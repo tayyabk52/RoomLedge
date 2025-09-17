@@ -2,8 +2,7 @@
 
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { CalendarDays, FileText, Save, Loader2 } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { CalendarDays, Save, Loader2, ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -23,9 +22,10 @@ interface PayerData {
 interface AddBillFormProps {
   room: Room
   onSuccess?: () => void
+  onBack?: () => void
 }
 
-export function AddBillForm({ room, onSuccess }: AddBillFormProps) {
+export function AddBillForm({ room, onSuccess, onBack }: AddBillFormProps) {
   const { user } = useAuth()
   const { data: roomMembers = [] } = useRoomMembers(room.id)
   const createBillMutation = useCreateBill()
@@ -114,172 +114,205 @@ export function AddBillForm({ room, onSuccess }: AddBillFormProps) {
   const isSubmitting = createBillMutation.isPending
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      {/* Form Header Card */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-      >
-        <Card className="overflow-hidden shadow-lg border-gray-200">
-          <CardHeader className="pb-4">
-            <div className="flex items-center gap-2">
-              <div className="p-2 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600">
-                <FileText className="h-4 w-4 text-white" />
-              </div>
-              <CardTitle className="text-lg font-semibold text-gray-900">
-                Bill Details
-              </CardTitle>
-            </div>
-          </CardHeader>
+    <div className="max-w-lg mx-auto px-4 py-1 lg:max-w-none lg:px-0 lg:py-0">
+      {/* Back Button - Mobile Only */}
+      {onBack && (
+        <motion.div
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.3 }}
+          className="mb-3 lg:hidden"
+        >
+          <Button
+            onClick={onBack}
+            variant="ghost"
+            className="flex items-center gap-2 px-3 py-2 h-9 rounded-lg hover:bg-gray-100 transition-colors text-gray-600 hover:text-gray-900"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span className="text-sm font-medium">Back</span>
+          </Button>
+        </motion.div>
+      )}
 
-          <CardContent className="space-y-4">
-            {/* Title Input */}
-            <div>
-              <Label htmlFor="title" className="text-sm font-medium text-gray-700">
-                What was this bill for?
-              </Label>
-              <Input
-                id="title"
-                type="text"
-                placeholder="e.g., Dinner at Restaurant"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className={`mt-1 ${errors.title ? 'border-red-300' : ''}`}
-                disabled={isSubmitting}
-              />
-              {errors.title && (
-                <p className="mt-1 text-xs text-red-600">{errors.title}</p>
-              )}
-            </div>
+      {/* Desktop Header */}
+      <div className="hidden lg:block mb-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold text-gray-900">Add New Bill</h1>
+            <p className="text-gray-600 text-sm mt-1">Split expenses with your roommates</p>
+          </div>
+          {onBack && (
+            <Button
+              onClick={onBack}
+              variant="ghost"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors text-gray-600 hover:text-gray-900"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span className="text-sm font-medium">Back</span>
+            </Button>
+          )}
+        </div>
+      </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Date Input */}
+      <form onSubmit={handleSubmit} className="space-y-3 lg:space-y-5">
+
+        {/* Form Fields - Desktop Card Layout */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.1 }}
+          className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200"
+        >
+          <div className="space-y-6">
+            {/* Title and Amount Row - Desktop */}
+            <div className="lg:grid lg:grid-cols-2 lg:gap-6 space-y-4 lg:space-y-0">
               <div>
-                <Label htmlFor="date" className="text-sm font-medium text-gray-700">
-                  Date
+                <Label htmlFor="title" className="text-sm font-medium text-gray-700 mb-2 block">
+                  Description
                 </Label>
-                <div className="relative mt-1">
+                <Input
+                  id="title"
+                  type="text"
+                  placeholder="e.g., Dinner, Groceries, Utilities"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className={`h-11 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500 ${
+                    errors.title ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''
+                  }`}
+                  disabled={isSubmitting}
+                />
+                {errors.title && (
+                  <p className="mt-1 text-xs text-red-600">{errors.title}</p>
+                )}
+              </div>
+
+              {/* Amount */}
+              <div>
+                <Label htmlFor="amount" className="text-sm font-medium text-gray-700 mb-2 block">
+                  Amount
+                </Label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-sm font-medium text-gray-600">
+                    {room.base_currency === 'PKR' ? '₨' : room.base_currency === 'USD' ? '$' : '€'}
+                  </span>
                   <Input
-                    id="date"
-                    type="date"
-                    value={date}
-                    onChange={(e) => setDate(e.target.value)}
-                    className={`pl-9 ${errors.date ? 'border-red-300' : ''}`}
+                    id="amount"
+                    type="number"
+                    placeholder="0.00"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    className={`h-11 pl-8 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500 ${
+                      errors.amount ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'text-gray-900'
+                    }`}
+                    min="0"
+                    step="0.01"
                     disabled={isSubmitting}
                   />
-                  <CalendarDays className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                 </div>
-                {errors.date && (
-                  <p className="mt-1 text-xs text-red-600">{errors.date}</p>
+                {errors.amount && (
+                  <p className="mt-1 text-xs text-red-600">{errors.amount}</p>
                 )}
               </div>
             </div>
-          </CardContent>
-        </Card>
-      </motion.div>
 
-      {/* Amount Input Card */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, delay: 0.05 }}
-      >
-        <Card className="overflow-hidden shadow-lg border-gray-200 bg-gradient-to-br from-emerald-50 to-teal-50">
-          <CardContent className="p-6">
-            <div className="text-center">
-              <Label htmlFor="amount" className="text-sm font-medium text-gray-700 block mb-2">
-                Total Amount
+            {/* Date Input */}
+            <div className="lg:max-w-xs">
+              <Label htmlFor="date" className="text-sm font-medium text-gray-700 mb-2 block">
+                Date
               </Label>
-
-              <div className="flex items-center justify-center gap-2">
-                <span className="text-2xl font-bold text-gray-600">
-                  {room.base_currency}
-                </span>
+              <div className="relative">
                 <Input
-                  id="amount"
-                  type="number"
-                  placeholder="0.00"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  className={`
-                    text-center text-3xl font-bold border-0 bg-transparent
-                    focus:ring-0 focus:outline-none p-2 max-w-[200px]
-                    ${errors.amount ? 'text-red-600' : 'text-gray-900'}
-                  `}
-                  min="0"
-                  step="0.01"
+                  id="date"
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  className={`h-11 pl-10 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500 ${
+                    errors.date ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''
+                  }`}
                   disabled={isSubmitting}
                 />
+                <CalendarDays className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               </div>
-
-              {errors.amount && (
-                <p className="mt-2 text-sm text-red-600">{errors.amount}</p>
+              {errors.date && (
+                <p className="mt-1 text-xs text-red-600">{errors.date}</p>
               )}
             </div>
-          </CardContent>
-        </Card>
-      </motion.div>
+          </div>
+        </motion.div>
 
-      {/* Participants Selector */}
-      <ParticipantSelector
-        members={roomMembers || []}
-        selectedParticipants={participants}
-        onSelectionChange={setParticipants}
-        currentUserId={user?.id || ''}
-      />
-      {errors.participants && (
-        <p className="text-sm text-red-600 mt-1 ml-4">{errors.participants}</p>
-      )}
-
-      {/* Payer Inputs */}
-      {participants.length > 0 && (
-        <PayerInput
-          members={roomMembers || []}
-          participants={participants}
-          payers={payers}
-          onPayersChange={setPayers}
-          totalAmount={parseFloat(amount) || 0}
-          currency={room.base_currency}
-          currentUserId={user?.id || ''}
-        />
-      )}
-      {errors.payers && (
-        <p className="text-sm text-red-600 mt-1 ml-4">{errors.payers}</p>
-      )}
-
-      {/* Submit Button */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, delay: 0.4 }}
-        className="sticky bottom-4 pt-4"
-      >
-        <Button
-          type="submit"
-          disabled={isSubmitting}
-          className={`
-            w-full h-14 rounded-2xl text-lg font-semibold
-            bg-gradient-to-r from-blue-500 to-indigo-600
-            hover:from-blue-600 hover:to-indigo-700
-            text-white shadow-lg hover:shadow-2xl
-            transition-all duration-300 group
-            ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}
-          `}
+        {/* Participants Selector */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.3 }}
+          className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200"
         >
-          {isSubmitting ? (
-            <div className="flex items-center gap-2">
-              <Loader2 className="h-5 w-5 animate-spin" />
-              <span>Creating Bill...</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <Save className="h-5 w-5 group-hover:rotate-12 transition-transform duration-300" />
-              <span>Create Bill</span>
-            </div>
+          <ParticipantSelector
+            members={roomMembers || []}
+            selectedParticipants={participants}
+            onSelectionChange={setParticipants}
+            currentUserId={user?.id || ''}
+          />
+          {errors.participants && (
+            <p className="text-xs text-red-600 mt-2">{errors.participants}</p>
           )}
-        </Button>
-      </motion.div>
-    </form>
+        </motion.div>
+
+        {/* Payer Inputs */}
+        {participants.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.4 }}
+            className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200"
+          >
+            <PayerInput
+              members={roomMembers || []}
+              participants={participants}
+              payers={payers}
+              onPayersChange={setPayers}
+              totalAmount={parseFloat(amount) || 0}
+              currency={room.base_currency}
+              currentUserId={user?.id || ''}
+            />
+            {errors.payers && (
+              <p className="text-xs text-red-600 mt-2">{errors.payers}</p>
+            )}
+          </motion.div>
+        )}
+
+        {/* Submit Button */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.5 }}
+          className="pt-2 lg:pt-4"
+        >
+          <Button
+            type="submit"
+            disabled={isSubmitting}
+            className={`
+              w-full h-12 lg:h-14 rounded-xl lg:rounded-2xl text-sm lg:text-base font-medium lg:font-semibold
+              bg-blue-500 hover:bg-blue-600 text-white 
+              border-0 shadow-sm hover:shadow-md lg:shadow-lg lg:hover:shadow-xl
+              transition-all duration-200 disabled:opacity-50
+              ${isSubmitting ? 'cursor-not-allowed' : 'cursor-pointer'}
+            `}
+          >
+            {isSubmitting ? (
+              <div className="flex items-center gap-2 lg:gap-3">
+                <Loader2 className="h-4 w-4 lg:h-5 lg:w-5 animate-spin" />
+                <span>Creating...</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 lg:gap-3">
+                <Save className="h-4 w-4 lg:h-5 lg:w-5" />
+                <span>Create Bill</span>
+              </div>
+            )}
+          </Button>
+        </motion.div>
+      </form>
+    </div>
   )
 }

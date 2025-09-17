@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { billService, SettlementOpportunity } from '@/lib/supabase-services'
+import { billService } from '@/lib/supabase-services'
 import { useAuth } from './use-auth'
 import { CreateBillData, CreateSettlementData } from '@/types'
 

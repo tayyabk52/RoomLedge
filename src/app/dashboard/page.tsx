@@ -86,6 +86,16 @@ export default function DashboardPage() {
     }
   }
 
+  const handleProfileClick = () => {
+    router.push('/profile')
+  }
+
+  const handleRoomDetailsClick = () => {
+    if (room?.id) {
+      router.push(`/room/${room.id}`)
+    }
+  }
+
   // Show loading while authentication is being checked
   if (!initialized || loading) {
     return (
@@ -134,39 +144,39 @@ export default function DashboardPage() {
           roomMembersCount={roomMembers?.length || 0}
           onSignOut={handleSignOut}
           onInviteMember={handleInviteMember}
+          onProfileClick={handleProfileClick}
+          onRoomDetailsClick={handleRoomDetailsClick}
         />
 
-        {/* Content - Responsive Layout */}
-        <div className="p-4 lg:p-6 lg:max-w-7xl lg:mx-auto">
-          {/* Responsive Grid Layout */}
-          <div className="md:grid md:grid-cols-1 lg:grid-cols-12 lg:gap-8">
-            {/* Left Column - Main Content */}
-            <div className="lg:col-span-8 space-y-6">
-              {/* Balance Card */}
+        {/* Uber-style Clean Content Layout */}
+        <div className="px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto py-6 lg:py-8">
+          {/* Main Dashboard Grid - Uber Style */}
+          <div className="space-y-6 lg:space-y-8">
+            
+            {/* Hero Section - Balance & Quick Actions */}
+            <div className="space-y-4 lg:space-y-6">
+              {/* Balance Card - Full Width */}
               <BalanceCard
                 amount={overallNet?.overall_net || 0}
                 currency={room?.base_currency || 'PKR'}
                 isLoading={netLoading}
               />
 
-              {/* Quick Actions */}
+              {/* Quick Actions - Clean Row */}
               <QuickActions
                 onAddBill={handleAddBill}
                 onSettleUp={handleSettleUp}
                 onInviteMember={handleInviteMember}
                 onViewHistory={handleViewHistory}
               />
+            </div>
 
-              {/* Room Statistics - Mobile & Tablet */}
-              <div className="lg:hidden">
-                <RoomStatsCard
-                  statistics={roomStatistics || null}
-                  isLoading={statsLoading}
-                />
-              </div>
-
-              {/* Bills Section - Mobile & Tablet */}
-              <div className="lg:hidden">
+            {/* Content Grid - Desktop 2-column, Mobile stacked */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
+              
+              {/* Left Column - Primary Content (2/3 width on desktop) */}
+              <div className="lg:col-span-2 space-y-6 lg:space-y-8">
+                {/* Bills Section */}
                 <BillList
                   bills={bills || []}
                   userPositions={userPositions || []}
@@ -175,42 +185,23 @@ export default function DashboardPage() {
                   onSettleBill={handleSettleBill}
                   isLoading={billsLoading}
                 />
-              </div>
 
-              {/* Activity Feed - Mobile & Tablet */}
-              <div className="lg:hidden">
+                {/* Activity Feed */}
                 <ActivityFeed
                   activities={recentActivity || []}
                   isLoading={activityLoading}
                   onBillClick={handleBillClick}
                 />
               </div>
-            </div>
 
-            {/* Right Column - Desktop Sidebar */}
-            <div className="hidden lg:block lg:col-span-4 space-y-6">
-              {/* Room Statistics - Desktop Sidebar */}
-              <RoomStatsCard
-                statistics={roomStatistics || null}
-                isLoading={statsLoading}
-              />
-
-              {/* Bills Section - Desktop Sidebar */}
-              <BillList
-                bills={bills || []}
-                userPositions={userPositions || []}
-                currentUserId={user?.id || ''}
-                onBillClick={handleBillClick}
-                onSettleBill={handleSettleBill}
-                isLoading={billsLoading}
-              />
-
-              {/* Activity Feed - Desktop Sidebar */}
-              <ActivityFeed
-                activities={recentActivity || []}
-                isLoading={activityLoading}
-                onBillClick={handleBillClick}
-              />
+              {/* Right Column - Secondary Content (1/3 width on desktop) */}
+              <div className="lg:col-span-1">
+                {/* Room Statistics */}
+                <RoomStatsCard
+                  statistics={roomStatistics || null}
+                  isLoading={statsLoading}
+                />
+              </div>
             </div>
           </div>
         </div>

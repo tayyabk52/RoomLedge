@@ -27,7 +27,12 @@ export function UserAvatar({ user, size = 'md', className }: UserAvatarProps) {
 
   return (
     <Avatar className={cn(sizeClasses[size], className)}>
-      <AvatarImage src={user.avatar_url || undefined} alt={user.full_name} />
+      <AvatarImage
+        src={user.avatar_url || undefined}
+        alt={user.full_name}
+        onError={() => console.log('Avatar image failed to load:', user.avatar_url)}
+        onLoad={() => console.log('Avatar image loaded successfully:', user.avatar_url)}
+      />
       <AvatarFallback className="bg-primary/10 text-primary font-medium">
         {getInitials(user.full_name)}
       </AvatarFallback>

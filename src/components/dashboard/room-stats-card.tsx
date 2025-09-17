@@ -3,7 +3,7 @@
 import { motion } from 'framer-motion'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Receipt, Users, TrendingUp, CheckCircle, Calendar } from 'lucide-react'
+import { Receipt, Users, TrendingUp, CheckCircle } from 'lucide-react'
 
 interface RoomStatistics {
   total_bills: number

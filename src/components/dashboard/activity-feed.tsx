@@ -1,12 +1,14 @@
 'use client'
 
+import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { UserAvatar } from '@/components/shared/user-avatar'
 import { EmptyState } from '@/components/shared/empty-state'
 import { Bill, BillSettlement } from '@/types'
-import { Receipt, ArrowRightLeft, Activity, Clock, CheckCircle } from 'lucide-react'
+import { Receipt, ArrowRightLeft, Activity, Clock, CheckCircle, ChevronDown } from 'lucide-react'
 
 interface ActivityItem {
   id: string
@@ -36,6 +38,15 @@ function CurrencyDisplay({ amount, currency, className = "" }: {
 }
 
 export function ActivityFeed({ activities, isLoading, onBillClick }: ActivityFeedProps) {
+  const [isExpanded, setIsExpanded] = useState(false)
+  
+  const INITIAL_DISPLAY_COUNT = 2
+  const displayedActivities = isExpanded ? activities : activities.slice(0, INITIAL_DISPLAY_COUNT)
+  const hasMoreActivities = activities.length > INITIAL_DISPLAY_COUNT
+
+  const handleToggleExpand = () => {
+    setIsExpanded(!isExpanded)
+  }
   if (isLoading) {
     return (
       <motion.div
@@ -128,9 +139,15 @@ export function ActivityFeed({ activities, isLoading, onBillClick }: ActivityFee
             <span>Recent Activity</span>
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
-
-          {activities.map((activity, index) => {
+        <CardContent>
+          {/* Activities Container with Professional Scrolling */}
+          <div className={`transition-all duration-300 ease-in-out ${
+            isExpanded 
+              ? 'max-h-[400px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400' 
+              : 'max-h-none'
+          }`}>
+            <div className="space-y-3">
+              {displayedActivities.map((activity, index) => {
             const handleActivityClick = () => {
               if (onBillClick) {
                 if (activity.type === 'bill' && activity.bill) {
@@ -258,6 +275,32 @@ export function ActivityFeed({ activities, isLoading, onBillClick }: ActivityFee
               </motion.div>
             )
           })}
+            </div>
+          </div>
+
+          {/* Premium Show More/Less Controls */}
+          {hasMoreActivities && (
+            <div className="mt-6 pt-4 border-t border-gray-100">
+              <Button
+                variant="ghost"
+                size="sm"
+                className={`w-full h-11 rounded-xl font-medium transition-all duration-200 ${
+                  isExpanded 
+                    ? 'bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-gray-800 border border-gray-200' 
+                    : 'bg-blue-50 hover:bg-blue-100 text-blue-600 hover:text-blue-700 border border-blue-200'
+                }`}
+                onClick={handleToggleExpand}
+              >
+                <ChevronDown className={`h-4 w-4 mr-2 transition-transform duration-200 ${
+                  isExpanded ? 'rotate-180' : ''
+                }`} />
+                {isExpanded 
+                  ? 'Show less' 
+                  : `Show ${activities.length - INITIAL_DISPLAY_COUNT} more activit${activities.length - INITIAL_DISPLAY_COUNT === 1 ? 'y' : 'ies'}`
+                }
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
     </motion.div>

@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -7,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { UserAvatar } from '@/components/shared/user-avatar'
 import { EmptyState } from '@/components/shared/empty-state'
 import { Bill, BillUserPosition } from '@/types'
-import { Receipt, Users, Calendar, ArrowUpRight, TrendingUp, TrendingDown, CheckCircle, DollarSign } from 'lucide-react'
+import { Receipt, Users, Calendar, ArrowUpRight, TrendingUp, TrendingDown, CheckCircle, DollarSign, ChevronDown } from 'lucide-react'
 
 interface BillListProps {
   bills: Bill[]
@@ -42,6 +43,15 @@ export function BillList({
   onSettleBill,
   isLoading
 }: BillListProps) {
+  const [isExpanded, setIsExpanded] = useState(false)
+  
+  const INITIAL_DISPLAY_COUNT = 2
+  const displayedBills = isExpanded ? bills : bills.slice(0, INITIAL_DISPLAY_COUNT)
+  const hasMoreBills = bills.length > INITIAL_DISPLAY_COUNT
+
+  const handleToggleExpand = () => {
+    setIsExpanded(!isExpanded)
+  }
   if (isLoading) {
     return (
       <motion.div
@@ -104,19 +114,6 @@ export function BillList({
     )
   }
 
-  const getStatusColor = (status: Bill['status']) => {
-    switch (status) {
-      case 'open':
-        return 'bg-gradient-to-r from-red-500 to-pink-500 text-white'
-      case 'partially_settled':
-        return 'bg-gradient-to-r from-yellow-500 to-orange-500 text-white'
-      case 'settled':
-        return 'bg-gradient-to-r from-green-500 to-emerald-500 text-white'
-      default:
-        return 'bg-gradient-to-r from-gray-500 to-slate-500 text-white'
-    }
-  }
-
   const getStatusIcon = (status: Bill['status']) => {
     switch (status) {
       case 'open':
@@ -149,24 +146,31 @@ export function BillList({
             <span>Recent Bills</span>
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
-          {bills.map((bill, index) => {
-            const userPosition = getUserPosition(bill.id)
-            const participantCount = bill.participants?.length || 0
-            const StatusIcon = getStatusIcon(bill.status)
+        <CardContent>
+          {/* Bills Container with Professional Scrolling */}
+          <div className={`transition-all duration-300 ease-in-out ${
+            isExpanded 
+              ? 'max-h-[400px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400' 
+              : 'max-h-none'
+          }`}>
+            <div className="space-y-3">
+              {displayedBills.map((bill, index) => {
+              const userPosition = getUserPosition(bill.id)
+              const participantCount = bill.participants?.length || 0
+              const StatusIcon = getStatusIcon(bill.status)
 
-            return (
-              <motion.div
-                key={bill.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.2, delay: index * 0.05 }}
-                className="group"
-              >
-                <Card
-                  className="cursor-pointer p-3 rounded-lg border bg-gray-50/50 hover:bg-gray-50 transition-colors duration-200"
-                  onClick={() => onBillClick(bill.id)}
+              return (
+                <motion.div
+                  key={bill.id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.2, delay: index * 0.05 }}
+                  className="group"
                 >
+                  <Card
+                    className="cursor-pointer p-3 rounded-lg border bg-gray-50/50 hover:bg-gray-50 transition-colors duration-200 hover:shadow-sm"
+                    onClick={() => onBillClick(bill.id)}
+                  >
 
                   <CardContent className="p-0">
                     <div className="flex items-start justify-between mb-3">
@@ -246,9 +250,9 @@ export function BillList({
                               e.stopPropagation()
                               onSettleBill(bill.id)
                             }}
-                            className="h-7 px-2 text-xs bg-orange-50 border-orange-200 text-orange-700 hover:bg-orange-100 hover:border-orange-300"
+                            className="h-8 px-3 text-xs font-medium rounded-full border-orange-200 bg-orange-50 text-orange-600 hover:bg-orange-100 hover:border-orange-300 transition-all duration-200"
                           >
-                            <DollarSign className="h-3 w-3 mr-1" />
+                            <DollarSign className="h-3 w-3 mr-1.5" />
                             Settle
                           </Button>
                         )}
@@ -259,15 +263,45 @@ export function BillList({
               </motion.div>
             )
           })}
+            </div>
+          </div>
 
-          <Button
-            variant="ghost"
-            className="w-full mt-3 bg-gray-50 hover:bg-gray-100 border text-gray-700 hover:text-gray-900 transition-colors"
-            onClick={() => onBillClick('')}
-          >
-            <Receipt className="h-4 w-4 mr-2" />
-            View all bills
-          </Button>
+          {/* Premium Show More/Less Controls */}
+          {hasMoreBills && (
+            <div className="mt-6 pt-4 border-t border-gray-100">
+              <Button
+                variant="ghost"
+                size="sm"
+                className={`w-full h-11 rounded-xl font-medium transition-all duration-200 ${
+                  isExpanded 
+                    ? 'bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-gray-800 border border-gray-200' 
+                    : 'bg-blue-50 hover:bg-blue-100 text-blue-600 hover:text-blue-700 border border-blue-200'
+                }`}
+                onClick={handleToggleExpand}
+              >
+                <ChevronDown className={`h-4 w-4 mr-2 transition-transform duration-200 ${
+                  isExpanded ? 'rotate-180' : ''
+                }`} />
+                {isExpanded 
+                  ? 'Show less' 
+                  : `Show ${bills.length - INITIAL_DISPLAY_COUNT} more bill${bills.length - INITIAL_DISPLAY_COUNT === 1 ? '' : 's'}`
+                }
+              </Button>
+            </div>
+          )}
+
+          {/* Premium Action Button */}
+          <div className="mt-4">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full h-11 rounded-xl font-medium bg-gradient-to-r from-gray-50 to-gray-100 hover:from-gray-100 hover:to-gray-200 text-gray-700 hover:text-gray-900 border border-gray-200 transition-all duration-200"
+              onClick={() => onBillClick('')}
+            >
+              <Receipt className="h-4 w-4 mr-2" />
+              View all bills
+            </Button>
+          </div>
         </CardContent>
       </Card>
     </motion.div>

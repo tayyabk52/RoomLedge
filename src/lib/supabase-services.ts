@@ -10,7 +10,8 @@ import {
   CreateBillData,
   BillSettlement,
   CreateSettlementData,
-  PaymentMethod
+  PaymentMethod,
+  User
 } from '@/types'
 
 export interface RoomService {
@@ -528,7 +529,7 @@ export const billService: BillService = {
       }
 
       // Get recent settlements - using a different approach to filter by room
-      const { data: roomBillIds, error: billIdsError } = await supabase
+      const { data: roomBillIds } = await supabase
         .from('bills')
         .select('id')
         .eq('room_id', roomId)
@@ -880,6 +881,237 @@ export const billService: BillService = {
       return { data: billDetails, error: null }
     } catch (err) {
       console.error('Update bill status error:', err)
+      return { data: null, error: err }
+    }
+  }
+}
+
+// Profile update data types
+export interface UpdateProfileData {
+  full_name?: string
+  avatar_url?: string
+}
+
+// Profile Service Interface
+export interface ProfileService {
+  updateProfile: (userId: string, data: UpdateProfileData) => Promise<{ data: User | null; error: unknown }>
+  uploadAvatar: (userId: string, file: File) => Promise<{ data: string | null; error: unknown }>
+  deleteAvatar: (userId: string) => Promise<{ error: unknown }>
+}
+
+// Room Details Service Interface
+export interface RoomDetailsService {
+  getRoomDetails: (roomId: string) => Promise<{ data: RoomDetails | null; error: unknown }>
+}
+
+export interface RoomDetails extends Room {
+  members: (RoomMember & { profile: User })[]
+  memberCount: number
+  createdByProfile?: User
+}
+
+// Profile Service Implementation
+export const profileService: ProfileService = {
+  async updateProfile(userId: string, data: UpdateProfileData) {
+    try {
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .update(data)
+        .eq('id', userId)
+        .select()
+        .single()
+
+      if (error) {
+        console.error('Error updating profile:', error)
+        return { data: null, error }
+      }
+
+      return { data: profile as User, error: null }
+    } catch (err) {
+      console.error('Update profile error:', err)
+      return { data: null, error: err }
+    }
+  },
+
+  async uploadAvatar(userId: string, file: File) {
+    try {
+      // Get current profile to check for existing avatar
+      const { data: currentProfile } = await supabase
+        .from('profiles')
+        .select('avatar_url')
+        .eq('id', userId)
+        .single()
+
+      // Create a unique filename
+      const fileExt = file.name.split('.').pop()
+      const fileName = `${userId}-${Date.now()}.${fileExt}`
+      const filePath = fileName
+
+      // Upload to Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false
+        })
+
+      if (uploadError) {
+        console.error('Error uploading avatar:', uploadError)
+        return { data: null, error: uploadError }
+      }
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath)
+
+      if (!urlData?.publicUrl) {
+        return { data: null, error: 'Failed to get avatar URL' }
+      }
+
+
+      // Update profile with new avatar URL
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ avatar_url: urlData.publicUrl })
+        .eq('id', userId)
+
+      if (updateError) {
+        console.error('Error updating profile with avatar URL:', updateError)
+        return { data: null, error: updateError }
+      }
+
+
+      // Delete old avatar if it exists
+      if (currentProfile?.avatar_url) {
+        const oldFileName = currentProfile.avatar_url.split('/').pop()
+        console.log('Old avatar URL:', currentProfile.avatar_url)
+        console.log('Extracted old filename:', oldFileName)
+        console.log('New filename:', fileName)
+
+        if (oldFileName && oldFileName !== fileName) {
+          console.log('Deleting old avatar:', oldFileName)
+          const { error: deleteError } = await supabase.storage
+            .from('avatars')
+            .remove([oldFileName])
+
+          if (deleteError) {
+            console.error('Error deleting old avatar:', deleteError)
+          } else {
+            console.log('Old avatar deleted successfully')
+          }
+        } else {
+          console.log('Skipping deletion - same filename or no old filename')
+        }
+      }
+
+      return { data: urlData.publicUrl, error: null }
+    } catch (err) {
+      console.error('Upload avatar error:', err)
+      return { data: null, error: err }
+    }
+  },
+
+  async deleteAvatar(userId: string) {
+    try {
+      // Get current profile to find existing avatar
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('avatar_url')
+        .eq('id', userId)
+        .single()
+
+      if (profileError) {
+        return { error: profileError }
+      }
+
+      // Remove avatar URL from profile
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ avatar_url: null })
+        .eq('id', userId)
+
+      if (updateError) {
+        console.error('Error removing avatar URL from profile:', updateError)
+        return { error: updateError }
+      }
+
+      // If there was an avatar file, try to delete it from storage
+      if (profile.avatar_url) {
+        const fileName = profile.avatar_url.split('/').pop()
+        console.log('Delete avatar - Full URL:', profile.avatar_url)
+        console.log('Delete avatar - Extracted filename:', fileName)
+
+        if (fileName) {
+          console.log('Attempting to delete avatar file:', fileName)
+          const { error: deleteError } = await supabase.storage
+            .from('avatars')
+            .remove([fileName])
+
+          if (deleteError) {
+            console.error('Error deleting avatar file:', deleteError)
+          } else {
+            console.log('Avatar file deleted successfully from storage')
+          }
+        } else {
+          console.log('No filename extracted from URL')
+        }
+      } else {
+        console.log('No avatar URL found in profile')
+      }
+
+      return { error: null }
+    } catch (err) {
+      console.error('Delete avatar error:', err)
+      return { error: err }
+    }
+  }
+}
+
+// Room Details Service Implementation
+export const roomDetailsService: RoomDetailsService = {
+  async getRoomDetails(roomId: string) {
+    try {
+      // Get room details
+      const { data: room, error: roomError } = await supabase
+        .from('rooms')
+        .select(`
+          *,
+          created_by_profile:profiles!rooms_created_by_fkey(*)
+        `)
+        .eq('id', roomId)
+        .single()
+
+      if (roomError) {
+        console.error('Error fetching room:', roomError)
+        return { data: null, error: roomError }
+      }
+
+      // Get room members with profiles
+      const { data: members, error: membersError } = await supabase
+        .from('room_members')
+        .select(`
+          *,
+          profile:profiles(*)
+        `)
+        .eq('room_id', roomId)
+        .order('joined_at', { ascending: true })
+
+      if (membersError) {
+        console.error('Error fetching room members:', membersError)
+        return { data: null, error: membersError }
+      }
+
+      const roomDetails: RoomDetails = {
+        ...room,
+        members: members as (RoomMember & { profile: User })[],
+        memberCount: members.length,
+        createdByProfile: room.created_by_profile?.[0] as User
+      }
+
+      return { data: roomDetails, error: null }
+    } catch (err) {
+      console.error('Get room details error:', err)
       return { data: null, error: err }
     }
   }
