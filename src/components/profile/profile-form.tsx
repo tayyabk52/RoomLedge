@@ -63,13 +63,12 @@ export function ProfileForm({ user }: ProfileFormProps) {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
+        className="flex flex-col items-center space-y-4"
       >
-        <div className="flex flex-col items-center space-y-4">
-          <AvatarUpload user={user} />
-          <p className="text-sm text-gray-600 text-center">
-            Click on your avatar to upload a new image
-          </p>
-        </div>
+        <AvatarUpload user={user} />
+        <p className="text-sm text-gray-600 text-center">
+          Click on your avatar to upload a new image
+        </p>
       </motion.div>
 
       {/* Name Input */}
@@ -77,7 +76,7 @@ export function ProfileForm({ user }: ProfileFormProps) {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, delay: 0.1 }}
-        className="space-y-2"
+        className="space-y-3"
       >
         <Label htmlFor="fullName" className="text-sm font-medium text-gray-700">
           Full Name
@@ -87,7 +86,9 @@ export function ProfileForm({ user }: ProfileFormProps) {
           type="text"
           value={fullName}
           onChange={(e) => setFullName(e.target.value)}
-          className={`${errors.fullName ? 'border-red-300' : ''}`}
+          className={`h-11 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500 ${
+            errors.fullName ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''
+          }`}
           disabled={isSubmitting}
           placeholder="Enter your full name"
         />
@@ -101,23 +102,23 @@ export function ProfileForm({ user }: ProfileFormProps) {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, delay: 0.2 }}
+        className="pt-2"
       >
         <Button
           type="submit"
           disabled={isSubmitting || !hasChanges}
           className={`
-            w-full h-12 rounded-xl text-base font-semibold
-            bg-gradient-to-r from-blue-500 to-indigo-600
-            hover:from-blue-600 hover:to-indigo-700
-            text-white shadow-lg hover:shadow-xl
-            transition-all duration-300
-            ${isSubmitting || !hasChanges ? 'opacity-50 cursor-not-allowed' : ''}
+            w-full h-12 rounded-xl text-sm font-medium
+            bg-blue-500 hover:bg-blue-600 text-white 
+            border-0 shadow-sm hover:shadow-md
+            transition-all duration-200
+            ${isSubmitting || !hasChanges ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
           `}
         >
           {isSubmitting ? (
             <div className="flex items-center gap-2">
               <Loader2 className="h-4 w-4 animate-spin" />
-              <span>Updating Profile...</span>
+              <span>Updating...</span>
             </div>
           ) : (
             <div className="flex items-center gap-2">

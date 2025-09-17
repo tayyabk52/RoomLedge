@@ -141,7 +141,7 @@ export function AvatarUpload({ user }: AvatarUploadProps) {
           size="sm"
           onClick={handleFileSelect}
           disabled={isLoading}
-          className="flex items-center gap-2"
+          className="flex items-center gap-2 h-9 px-4 text-sm border-gray-300 rounded-lg hover:bg-gray-50 focus:border-blue-500 focus:ring-blue-500"
         >
           <Camera className="h-4 w-4" />
           {isUploading ? 'Uploading...' : 'Change Avatar'}
@@ -154,7 +154,7 @@ export function AvatarUpload({ user }: AvatarUploadProps) {
             size="sm"
             onClick={handleDeleteAvatar}
             disabled={isLoading}
-            className="flex items-center gap-2 text-red-600 hover:text-red-700 hover:bg-red-50"
+            className="flex items-center gap-2 h-9 px-4 text-sm border-red-300 text-red-600 rounded-lg hover:bg-red-50 hover:border-red-400 focus:border-red-500 focus:ring-red-500"
           >
             <Trash2 className="h-4 w-4" />
             {isDeleting ? 'Removing...' : 'Remove'}

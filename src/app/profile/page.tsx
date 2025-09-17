@@ -4,16 +4,21 @@ import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { LoadingSpinner } from '@/components/shared/loading-spinner'
 import { ProfileForm } from '@/components/profile/profile-form'
+import { ResponsiveNav } from '@/components/navigation/responsive-nav'
 import { useAuth } from '@/hooks/use-auth'
-import { ArrowLeft, User } from 'lucide-react'
+import { useUserRoom, useRoomMembers } from '@/hooks/use-room-data'
+import { supabase } from '@/lib/supabase'
+import { ArrowLeft, User, Calendar, Hash } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { motion } from 'framer-motion'
+import { toast } from 'sonner'
 
 export const dynamic = 'force-dynamic'
 
 export default function ProfilePage() {
   const { user, profile, loading, initialized } = useAuth()
+  const { data: room } = useUserRoom()
+  const { data: roomMembers = [] } = useRoomMembers(room?.id)
   const router = useRouter()
 
   useEffect(() => {
@@ -25,6 +30,23 @@ export default function ProfilePage() {
 
   const handleGoBack = () => {
     router.back()
+  }
+
+  const handleSignOut = async () => {
+    try {
+      await supabase.auth.signOut()
+      router.push('/auth/login')
+    } catch (error) {
+      console.error('Error signing out:', error)
+      toast.error('Failed to sign out')
+    }
+  }
+
+  const handleInviteMember = () => {
+    if (room?.invite_code) {
+      navigator.clipboard.writeText(room.invite_code)
+      toast.success('Invite code copied to clipboard!')
+    }
   }
 
   // Show loading while authentication is being checked
@@ -52,87 +74,138 @@ export default function ProfilePage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Mobile-first container */}
-      <div className="mx-auto bg-white min-h-screen max-w-md lg:max-w-4xl lg:bg-transparent">
-        {/* Header */}
-        <div className="sticky top-0 z-40 bg-white border-b shadow-sm lg:bg-gray-50 lg:border-0 lg:shadow-none">
-          <div className="p-4 lg:p-6">
-            <div className="flex items-center gap-4">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleGoBack}
-                className="lg:hidden"
-              >
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
+      {/* Consistent Navigation */}
+      {user && room && profile && (
+        <ResponsiveNav
+          user={{
+            id: user.id,
+            full_name: user.user_metadata?.full_name || user.email || 'Unknown User',
+            avatar_url: user.user_metadata?.avatar_url,
+            created_at: user.created_at
+          }}
+          room={room}
+          roomMembersCount={roomMembers?.length || 0}
+          onSignOut={handleSignOut}
+          onInviteMember={handleInviteMember}
+          onProfileClick={() => router.push('/profile')}
+          onRoomDetailsClick={() => router.push(`/room/${room.id}`)}
+        />
+      )}
 
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center">
-                  <User className="h-4 w-4 text-white" />
-                </div>
-                <div>
-                  <h1 className="text-xl lg:text-2xl font-bold text-gray-900">
-                    Profile Settings
-                  </h1>
-                  <p className="text-sm text-gray-600 hidden lg:block">
-                    Manage your personal information and avatar
-                  </p>
+      {/* Content with proper top spacing for fixed nav */}
+      <div className="pt-16 lg:pt-20">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="lg:grid lg:grid-cols-12 lg:gap-8">
+            {/* Desktop: Left sidebar */}
+            <div className="hidden lg:block lg:col-span-4">
+              <div className="sticky top-24">
+                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 bg-blue-500 rounded-2xl flex items-center justify-center">
+                      <User className="h-5 w-5 text-white" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Profile Settings</h2>
+                      <p className="text-sm text-gray-600">Manage your account</p>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-3 text-sm text-gray-500">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                      <span>Update personal information</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                      <span>Change profile picture</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                      <span>View account details</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
 
-        {/* Content */}
-        <div className="p-4 lg:p-6 lg:max-w-4xl lg:mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            <Card className="shadow-lg border-gray-200">
-              <CardHeader className="pb-4">
-                <CardTitle className="text-lg font-semibold text-gray-900">
-                  Personal Information
-                </CardTitle>
-                <p className="text-sm text-gray-600">
-                  Update your profile details and avatar image
-                </p>
-              </CardHeader>
-              <CardContent>
-                <ProfileForm user={profile} />
-              </CardContent>
-            </Card>
+            {/* Main content */}
+            <div className="lg:col-span-8">
+              {/* Mobile header */}
+              <div className="lg:hidden mb-4">
+                <div className="flex items-center gap-3">
+                  <Button
+                    onClick={handleGoBack}
+                    variant="ghost"
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors text-gray-600 hover:text-gray-900"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                    <span className="text-sm font-medium">Back</span>
+                  </Button>
+                </div>
+              </div>
 
-            {/* Account Info */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.1 }}
-              className="mt-6"
-            >
-              <Card className="shadow-lg border-gray-200">
-                <CardHeader className="pb-4">
-                  <CardTitle className="text-lg font-semibold text-gray-900">
-                    Account Information
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
+              {/* Desktop header */}
+              <div className="hidden lg:block mb-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h1 className="text-2xl font-semibold text-gray-900">Profile Settings</h1>
+                    <p className="text-gray-600 text-sm mt-1">Manage your personal information and preferences</p>
+                  </div>
+                  <Button
+                    onClick={handleGoBack}
+                    variant="ghost"
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors text-gray-600 hover:text-gray-900"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                    <span className="text-sm font-medium">Back</span>
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                {/* Profile Form Card */}
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200"
+                >
+                  <div className="mb-6">
+                    <h2 className="text-lg font-semibold text-gray-900 mb-2">Personal Information</h2>
+                    <p className="text-sm text-gray-600">Update your profile details and avatar image</p>
+                  </div>
+                  <ProfileForm user={profile} />
+                </motion.div>
+
+                {/* Account Information Card */}
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3, delay: 0.1 }}
+                  className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200"
+                >
+                  <div className="mb-6">
+                    <h2 className="text-lg font-semibold text-gray-900 mb-2">Account Information</h2>
+                    <p className="text-sm text-gray-600">View your account details and activity</p>
+                  </div>
+                  
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-sm font-medium text-gray-700">
-                        User ID
-                      </label>
-                      <p className="text-sm text-gray-600 font-mono mt-1 p-2 bg-gray-50 rounded">
+                    <div className="p-4 bg-gray-50 rounded-xl">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Hash className="h-4 w-4 text-gray-500" />
+                        <label className="text-sm font-medium text-gray-700">User ID</label>
+                      </div>
+                      <p className="text-sm text-gray-600 font-mono break-all">
                         {profile.id}
                       </p>
                     </div>
-                    <div>
-                      <label className="text-sm font-medium text-gray-700">
-                        Member Since
-                      </label>
-                      <p className="text-sm text-gray-600 mt-1 p-2 bg-gray-50 rounded">
+                    
+                    <div className="p-4 bg-gray-50 rounded-xl">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Calendar className="h-4 w-4 text-gray-500" />
+                        <label className="text-sm font-medium text-gray-700">Member Since</label>
+                      </div>
+                      <p className="text-sm text-gray-600">
                         {new Date(profile.created_at).toLocaleDateString('en-US', {
                           year: 'numeric',
                           month: 'long',
@@ -141,10 +214,10 @@ export default function ProfilePage() {
                       </p>
                     </div>
                   </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          </motion.div>
+                </motion.div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
