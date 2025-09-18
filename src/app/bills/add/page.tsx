@@ -13,7 +13,7 @@ import { toast } from 'sonner'
 export const dynamic = 'force-dynamic'
 
 export default function AddBillPage() {
-  const { user, loading, initialized } = useAuth()
+  const { user, profile, loading, initialized } = useAuth()
   const { data: room, isLoading: roomLoading } = useUserRoom()
   const { data: roomMembers = [] } = useRoomMembers(room?.id)
   const router = useRouter()
@@ -77,14 +77,9 @@ export default function AddBillPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Consistent Navigation */}
-      {user && room && (
+      {user && room && profile && (
         <ResponsiveNav
-          user={{ 
-            id: user.id, 
-            full_name: user.user_metadata?.full_name || user.email || 'Unknown User',
-            avatar_url: user.user_metadata?.avatar_url,
-            created_at: user.created_at
-          }}
+          user={profile}
           room={room}
           roomMembersCount={roomMembers?.length || 0}
           onSignOut={handleSignOut}

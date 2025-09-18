@@ -77,12 +77,7 @@ export default function ProfilePage() {
       {/* Consistent Navigation */}
       {user && room && profile && (
         <ResponsiveNav
-          user={{
-            id: user.id,
-            full_name: user.user_metadata?.full_name || user.email || 'Unknown User',
-            avatar_url: user.user_metadata?.avatar_url,
-            created_at: user.created_at
-          }}
+          user={profile}
           room={room}
           roomMembersCount={roomMembers?.length || 0}
           onSignOut={handleSignOut}

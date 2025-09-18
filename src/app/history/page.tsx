@@ -3,10 +3,11 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { Calendar, Filter, Receipt, Users, CheckCircle, Clock, AlertTriangle, ArrowUpRight, Search } from 'lucide-react'
+import { Calendar, Filter, Receipt, Users, CheckCircle, Clock, AlertTriangle, ArrowUpRight, Search, ArrowLeft } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { LoadingSpinner } from '@/components/shared/loading-spinner'
 import { EmptyState } from '@/components/shared/empty-state'
@@ -50,6 +51,10 @@ export default function HistoryPage() {
 
   const handleSignOut = async () => {
     toast.info('Sign out functionality not implemented yet')
+  }
+
+  const handleGoBack = () => {
+    router.back()
   }
 
   const handleInviteMember = () => {
@@ -161,6 +166,15 @@ export default function HistoryPage() {
             <Card className="bg-gradient-to-br from-purple-500 to-indigo-600 text-white border-0 shadow-xl">
               <CardContent className="p-6">
                 <div className="flex items-center gap-3 mb-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleGoBack}
+                    className="flex items-center gap-2 text-white/80 hover:text-white hover:bg-white/10 -ml-2"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                    <span className="hidden sm:inline">Back</span>
+                  </Button>
                   <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
                     <Calendar className="h-5 w-5" />
                   </div>
