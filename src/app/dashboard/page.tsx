@@ -59,6 +59,10 @@ export default function DashboardPage() {
     router.push('/bills/add')
   }
 
+  const handleAddAdvanceBill = () => {
+    router.push('/bills/add-advance')
+  }
+
   const handleSettleUp = () => {
     router.push('/bills/settle')
   }
@@ -165,6 +169,7 @@ export default function DashboardPage() {
               {/* Quick Actions - Clean Row */}
               <QuickActions
                 onAddBill={handleAddBill}
+                onAddAdvanceBill={handleAddAdvanceBill}
                 onSettleUp={handleSettleUp}
                 onInviteMember={handleInviteMember}
                 onViewHistory={handleViewHistory}

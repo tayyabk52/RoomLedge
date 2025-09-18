@@ -11,7 +11,9 @@ import {
   BillSettlement,
   CreateSettlementData,
   PaymentMethod,
-  User
+  User,
+  CreateAdvanceBillData,
+  AdvanceBillPreview
 } from '@/types'
 
 export interface RoomService {
@@ -33,6 +35,9 @@ export interface BillService {
   createSettlement: (data: CreateSettlementData) => Promise<{ data: BillSettlement | null; error: unknown }>
   getSettlementOpportunities: (roomId: string, userId: string) => Promise<{ data: SettlementOpportunity[] | null; error: unknown }>
   updateBillStatus: (billId: string) => Promise<{ data: Bill | null; error: unknown }>
+  // Advanced bill methods
+  createAdvancedBill: (data: CreateAdvanceBillData, userId: string) => Promise<{ data: Bill | null; error: unknown }>
+  getAdvancedBillCalculations: (billId: string) => Promise<{ data: AdvanceBillPreview | null; error: unknown }>
 }
 
 export interface RoomStatistics {
@@ -881,6 +886,315 @@ export const billService: BillService = {
       return { data: billDetails, error: null }
     } catch (err) {
       console.error('Update bill status error:', err)
+      return { data: null, error: err }
+    }
+  },
+
+  async createAdvancedBill(data: CreateAdvanceBillData, userId: string) {
+    try {
+      // Import BillCalculator and utils
+      const { BillCalculator } = await import('@/lib/bill-calculator')
+      const { toPaisa } = await import('@/lib/paisa-utils')
+
+      // Calculate total bill amount from items and extras
+      const itemsTotal = data.items.reduce((sum, item) => sum + (item.price * item.quantity), 0)
+      const extrasTotal = data.extras.reduce((sum, extra) => sum + extra.amount, 0)
+      const totalAmount = itemsTotal + extrasTotal
+
+      // Use BillCalculator to compute accurate balances
+      const calculatorInput = {
+        items: data.items.map(item => ({
+          userId: item.user_id,
+          itemName: item.item_name,
+          pricePaisa: toPaisa(item.price),
+          quantity: item.quantity
+        })),
+        extras: data.extras.map(extra => ({
+          type: extra.extra_type,
+          name: extra.name,
+          amountPaisa: toPaisa(extra.amount),
+          splitRule: extra.split_rule
+        })),
+        payers: data.payers.map(payer => ({
+          userId: payer.user_id,
+          amountPaidPaisa: toPaisa(payer.amount_paid),
+          coverageType: payer.coverage_type,
+          coverageTargets: payer.coverage_targets,
+          coverageWeights: payer.coverage_weights ? new Map(Object.entries(payer.coverage_weights)) : undefined
+        })),
+        participants: data.participants
+      }
+
+      const calculationResult = BillCalculator.calculate(calculatorInput)
+
+      // Create the main bill record
+      const { data: bill, error: billError } = await supabase
+        .from('bills')
+        .insert({
+          room_id: data.room_id,
+          title: data.title,
+          total_amount: totalAmount,
+          currency: 'PKR', // Always PKR for now
+          bill_date: data.bill_date,
+          created_by: userId,
+          status: 'open',
+          is_advanced: true
+        })
+        .select()
+        .single()
+
+      if (billError) {
+        console.error('Error creating advanced bill:', billError)
+        return { data: null, error: billError }
+      }
+
+      // Insert bill participants
+      const participantInserts = data.participants.map(participantId => ({
+        bill_id: bill.id,
+        user_id: participantId
+      }))
+
+      const { error: participantsError } = await supabase
+        .from('bill_participants')
+        .insert(participantInserts)
+
+      if (participantsError) {
+        console.error('Error adding participants:', participantsError)
+        await supabase.from('bills').delete().eq('id', bill.id)
+        return { data: null, error: participantsError }
+      }
+
+      // Insert bill payers
+      const payerInserts = data.payers.map(payer => ({
+        bill_id: bill.id,
+        user_id: payer.user_id,
+        amount_paid: payer.amount_paid
+      }))
+
+      const { error: payersError } = await supabase
+        .from('bill_payers')
+        .insert(payerInserts)
+
+      if (payersError) {
+        console.error('Error adding payers:', payersError)
+        await supabase.from('bill_participants').delete().eq('bill_id', bill.id)
+        await supabase.from('bills').delete().eq('id', bill.id)
+        return { data: null, error: payersError }
+      }
+
+      // Insert bill items
+      const itemInserts = data.items.map(item => ({
+        bill_id: bill.id,
+        user_id: item.user_id,
+        item_name: item.item_name,
+        price_paisa: toPaisa(item.price),
+        quantity: item.quantity
+      }))
+
+      const { error: itemsError } = await supabase
+        .from('bill_items')
+        .insert(itemInserts)
+
+      if (itemsError) {
+        console.error('Error adding bill items:', itemsError)
+        // Clean up previous inserts
+        await supabase.from('bill_payers').delete().eq('bill_id', bill.id)
+        await supabase.from('bill_participants').delete().eq('bill_id', bill.id)
+        await supabase.from('bills').delete().eq('id', bill.id)
+        return { data: null, error: itemsError }
+      }
+
+      // Insert bill extras if any
+      if (data.extras.length > 0) {
+        const extrasInserts = data.extras.map(extra => ({
+          bill_id: bill.id,
+          extra_type: extra.extra_type,
+          name: extra.name,
+          amount_paisa: toPaisa(extra.amount),
+          split_rule: extra.split_rule
+        }))
+
+        const { error: extrasError } = await supabase
+          .from('bill_extras')
+          .insert(extrasInserts)
+
+        if (extrasError) {
+          console.error('Error adding bill extras:', extrasError)
+          // Clean up previous inserts
+          await supabase.from('bill_items').delete().eq('bill_id', bill.id)
+          await supabase.from('bill_payers').delete().eq('bill_id', bill.id)
+          await supabase.from('bill_participants').delete().eq('bill_id', bill.id)
+          await supabase.from('bills').delete().eq('bill_id', bill.id)
+          return { data: null, error: extrasError }
+        }
+      }
+
+      // Insert calculated balances
+      const calculationInserts = data.participants.map(userId => {
+        const userBalance = calculationResult.userBalances.get(userId)
+        return {
+          bill_id: bill.id,
+          user_id: userId,
+          owed_paisa: userBalance?.owedPaisa || 0,
+          covered_paisa: userBalance?.coveredPaisa || 0,
+          net_paisa: userBalance?.netPaisa || 0,
+          remaining_paisa: userBalance?.remainingPaisa || userBalance?.netPaisa || 0
+        }
+      })
+
+      const { error: calculationsError } = await supabase
+        .from('bill_calculations')
+        .insert(calculationInserts)
+
+      if (calculationsError) {
+        console.error('Error adding bill calculations:', calculationsError)
+        // Clean up previous inserts
+        await supabase.from('bill_extras').delete().eq('bill_id', bill.id)
+        await supabase.from('bill_items').delete().eq('bill_id', bill.id)
+        await supabase.from('bill_payers').delete().eq('bill_id', bill.id)
+        await supabase.from('bill_participants').delete().eq('bill_id', bill.id)
+        await supabase.from('bills').delete().eq('id', bill.id)
+        return { data: null, error: calculationsError }
+      }
+
+      // Insert suggested transfers
+      if (calculationResult.suggestedTransfers.length > 0) {
+        const transferInserts = calculationResult.suggestedTransfers.map(transfer => ({
+          bill_id: bill.id,
+          from_user_id: transfer.fromUserId,
+          to_user_id: transfer.toUserId,
+          amount_paisa: transfer.amountPaisa
+        }))
+
+        const { error: transfersError } = await supabase
+          .from('bill_suggested_transfers')
+          .insert(transferInserts)
+
+        if (transfersError) {
+          console.error('Error adding suggested transfers:', transfersError)
+          // Note: Not cleaning up here as transfers are optional
+        }
+      }
+
+      // Fetch the complete bill with relations
+      const { data: completeBill, error: fetchError } = await this.getBillDetails(bill.id)
+
+      if (fetchError) {
+        console.error('Error fetching complete advanced bill:', fetchError)
+        return { data: bill as unknown as Bill, error: null }
+      }
+
+      return { data: completeBill, error: null }
+    } catch (err) {
+      console.error('Create advanced bill error:', err)
+      return { data: null, error: err }
+    }
+  },
+
+  async getAdvancedBillCalculations(billId: string) {
+    try {
+      // Get bill details first
+      const { data: billDetails, error: billError } = await supabase
+        .from('bills')
+        .select('*')
+        .eq('id', billId)
+        .eq('is_advanced', true)
+        .single()
+
+      if (billError || !billDetails) {
+        console.error('Error fetching advanced bill:', billError)
+        return { data: null, error: billError || 'Bill not found' }
+      }
+
+      // Get user calculations
+      const { data: calculations, error: calculationsError } = await supabase
+        .from('v_bill_balance_summary')
+        .select('*')
+        .eq('bill_id', billId)
+
+      if (calculationsError) {
+        console.error('Error fetching bill calculations:', calculationsError)
+        return { data: null, error: calculationsError }
+      }
+
+      // Get suggested transfers
+      const { data: transfers, error: transfersError } = await supabase
+        .from('bill_suggested_transfers')
+        .select(`
+          *,
+          from_profile:profiles!bill_suggested_transfers_from_user_id_fkey(
+            id,
+            full_name,
+            avatar_url
+          ),
+          to_profile:profiles!bill_suggested_transfers_to_user_id_fkey(
+            id,
+            full_name,
+            avatar_url
+          )
+        `)
+        .eq('bill_id', billId)
+
+      if (transfersError) {
+        console.error('Error fetching suggested transfers:', transfersError)
+        return { data: null, error: transfersError }
+      }
+
+      // Get bill items for detailed breakdown
+      const { data: items, error: itemsError } = await supabase
+        .from('v_user_bill_items')
+        .select('*')
+        .eq('bill_id', billId)
+
+      if (itemsError) {
+        console.error('Error fetching bill items:', itemsError)
+        // Continue without items as they're for detail only
+      }
+
+      // Transform data to AdvanceBillPreview format
+      const preview: AdvanceBillPreview = {
+        items_total_paisa: calculations?.reduce((sum, calc) => {
+          const userItems = items?.filter(item => item.user_id === calc.user_id) || []
+          return sum + userItems.reduce((itemSum, item) => itemSum + item.total_paisa, 0)
+        }, 0) || 0,
+        extras_total_paisa: (billDetails.total_amount * 100) - (calculations?.reduce((sum, calc) => {
+          const userItems = items?.filter(item => item.user_id === calc.user_id) || []
+          return sum + userItems.reduce((itemSum, item) => itemSum + item.total_paisa, 0)
+        }, 0) || 0),
+        bill_total_paisa: Math.round(billDetails.total_amount * 100),
+        paid_total_paisa: calculations?.reduce((sum, calc) => sum + calc.covered_paisa, 0) || 0,
+        user_breakdowns: calculations?.map(calc => ({
+          user_id: calc.user_id,
+          user_name: calc.full_name,
+          items_paisa: items?.filter(item => item.user_id === calc.user_id)
+            .reduce((sum, item) => sum + item.total_paisa, 0) || 0,
+          extras_share_paisa: calc.owed_paisa - (items?.filter(item => item.user_id === calc.user_id)
+            .reduce((sum, item) => sum + item.total_paisa, 0) || 0),
+          total_owed_paisa: calc.owed_paisa,
+          covered_paisa: calc.covered_paisa,
+          net_paisa: calc.net_paisa,
+          items_detail: items?.filter(item => item.user_id === calc.user_id).map(item => ({
+            item_name: item.item_name,
+            price: item.total_amount / item.quantity,
+            quantity: item.quantity,
+            user_id: item.user_id
+          })) || [],
+          extras_detail: [] // TODO: Add extras detail if needed
+        })) || [],
+        suggested_transfers: transfers?.map(transfer => ({
+          from_user_id: transfer.from_user_id,
+          to_user_id: transfer.to_user_id,
+          amount_paisa: transfer.amount_paisa,
+          from_profile: transfer.from_profile?.[0] || undefined,
+          to_profile: transfer.to_profile?.[0] || undefined
+        })) || [],
+        is_balanced: calculations?.every(calc => Math.abs(calc.remaining_paisa) <= 100) || false,
+        validation_errors: []
+      }
+
+      return { data: preview, error: null }
+    } catch (err) {
+      console.error('Get advanced bill calculations error:', err)
       return { data: null, error: err }
     }
   }

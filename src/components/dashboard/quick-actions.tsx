@@ -2,10 +2,11 @@
 
 import { motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
-import { Plus, DollarSign, UserPlus, Clock } from 'lucide-react'
+import { Plus, DollarSign, UserPlus, Clock, Calculator } from 'lucide-react'
 
 interface QuickActionsProps {
   onAddBill: () => void
+  onAddAdvanceBill: () => void
   onSettleUp: () => void
   onInviteMember: () => void
   onViewHistory: () => void
@@ -13,6 +14,7 @@ interface QuickActionsProps {
 
 export function QuickActions({
   onAddBill,
+  onAddAdvanceBill,
   onSettleUp,
   onInviteMember,
   onViewHistory
@@ -25,6 +27,15 @@ export function QuickActions({
       color: 'blue',
       bgColor: 'bg-blue-500',
       hoverBg: 'hover:bg-blue-600',
+      textColor: 'text-white'
+    },
+    {
+      label: 'Advanced Bill',
+      icon: Calculator,
+      onClick: onAddAdvanceBill,
+      color: 'indigo',
+      bgColor: 'bg-indigo-500',
+      hoverBg: 'hover:bg-indigo-600',
       textColor: 'text-white'
     },
     {
@@ -64,7 +75,7 @@ export function QuickActions({
       className="w-full"
     >
       {/* Uber-style Clean Action Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 lg:gap-4">
         {actions.map((action, index) => (
           <motion.div
             key={action.label}
