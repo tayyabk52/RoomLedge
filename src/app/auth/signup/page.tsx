@@ -32,7 +32,7 @@ type SignupForm = z.infer<typeof signupSchema>
 
 export default function SignupPage() {
   const [isLoading, setIsLoading] = useState(false)
-  const { signUp } = useAuth()
+  const { actions: { signUp } } = useAuth()
   const router = useRouter()
 
   const form = useForm<SignupForm>({

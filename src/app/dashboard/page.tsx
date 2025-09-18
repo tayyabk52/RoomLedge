@@ -19,7 +19,7 @@ export const dynamic = 'force-dynamic'
 
 
 export default function DashboardPage() {
-  const { user, profile, loading, initialized, signOut } = useAuth()
+  const { user, profile, loading, initialized, actions: { signOut } } = useAuth()
   const router = useRouter()
 
   // Fetch room and bill data
