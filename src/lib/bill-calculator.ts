@@ -5,7 +5,7 @@
  */
 
 import { Paisa, paisaUtils } from './paisa-utils';
-import { HamiltonRounder, ProportionalTarget } from './hamilton-rounding';
+import { HamiltonRounder } from './hamilton-rounding';
 
 // Core data structures
 export interface BillItem {

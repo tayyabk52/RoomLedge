@@ -13,6 +13,7 @@ import { useCreateSettlement, useUserPosition } from '@/hooks/use-bill-data'
 import { useRoomMembers } from '@/hooks/use-room-data'
 import { Bill, Room, PaymentMethod, CreateSettlementData } from '@/types'
 import { toast } from 'sonner'
+import { deriveSuggestedTransfersFromCalculations } from '@/lib/settlement-utils'
 
 interface SettleUpFormProps {
   bill: Bill
@@ -38,6 +39,9 @@ export function SettleUpForm({ bill, room, currentUserId, onSuccess }: SettleUpF
   const userCalculation = bill.is_advanced
     ? bill.calculations?.find(calc => calc.user_id === currentUserId)
     : undefined
+  const advancedTransfers = bill.is_advanced && bill.calculations?.length
+    ? deriveSuggestedTransfersFromCalculations(bill.calculations, bill.id)
+    : []
 
   const calculationRemaining = userCalculation ? userCalculation.remaining_paisa / 100 : undefined
 
@@ -72,19 +76,65 @@ export function SettleUpForm({ bill, room, currentUserId, onSuccess }: SettleUpF
     name: string
     amount: number
   }> => {
-    const recipients: Array<{
-      userId: string
-      name: string
-      amount: number
-    }> = []
     const settlementAmount = parseFloat(amount) || 0
 
-    if (!userPositions || settlementAmount <= 0) return recipients
+    if (settlementAmount <= 0) {
+      return []
+    }
+
+    if (bill.is_advanced && bill.calculations?.length) {
+      const requestedPaisa = Math.max(0, Math.round(settlementAmount * 100))
+      const maxPaisa = Math.max(0, Math.round(maxSettlementAmount * 100))
+      const amountPaisa = Math.min(requestedPaisa, maxPaisa)
+
+      if (amountPaisa <= 0) {
+        return []
+      }
+
+      const userTransfers = advancedTransfers.filter(transfer => transfer.from_user_id === currentUserId)
+
+      if (userTransfers.length === 0) {
+        return []
+      }
+
+      let remainingPaisa = amountPaisa
+      const derivedRecipients: Array<{ userId: string; name: string; amount: number }> = []
+
+      for (const transfer of userTransfers) {
+        if (remainingPaisa <= 0) break
+
+        const transferPaisa = Number(transfer.amount_paisa || 0)
+        const amountToThisCreditor = Math.min(transferPaisa, remainingPaisa)
+
+        if (amountToThisCreditor > 0) {
+          const profile =
+            bill.calculations?.find(calc => calc.user_id === transfer.to_user_id)?.profile ||
+            bill.participants?.find(p => p.user_id === transfer.to_user_id)?.profile ||
+            roomMembers?.find(member => member.user_id === transfer.to_user_id)?.profile
+
+          derivedRecipients.push({
+            userId: transfer.to_user_id,
+            name: profile?.full_name || 'User',
+            amount: amountToThisCreditor / 100
+          })
+
+          remainingPaisa -= amountToThisCreditor
+        }
+      }
+
+      return derivedRecipients
+    }
+
+    if (!userPositions) {
+      return []
+    }
+
+    const recipients: Array<{ userId: string; name: string; amount: number }> = []
 
     // Find creditors (people who are owed money on this bill - positive net_after_settlement)
     const creditors = userPositions
       .filter(p => p.bill_id === bill.id && p.user_id !== currentUserId && p.net_after_settlement > 0)
-      .sort((a, b) => b.net_after_settlement - a.net_after_settlement) // Sort by amount owed (highest first)
+      .sort((a, b) => b.net_after_settlement - a.net_after_settlement)
 
     let remainingSettlement = settlementAmount
 
@@ -118,7 +168,7 @@ export function SettleUpForm({ bill, room, currentUserId, onSuccess }: SettleUpF
       return
     }
 
-    if (settlementAmount > maxSettlementAmount) {
+    if (settlementAmount - maxSettlementAmount > 0.009) {
       toast.error(`Settlement amount cannot exceed ${maxSettlementAmount.toFixed(2)}`)
       return
     }
