@@ -120,28 +120,41 @@ export default function BillDetailsPage() {
   const settlements = bill.settlements || []
   const StatusIcon = getStatusIcon(bill.status)
 
-  // Calculate equal share per participant
+  // Calculate equal share per participant (fallback for non-advanced bills)
   const sharePerParticipant = participants.length > 0 ? bill.total_amount / participants.length : 0
 
-  // Calculate who owes what
   const participantSummary = participants.map(participant => {
-    const amountPaid = payers.find(p => p.user_id === participant.user_id)?.amount_paid || 0
-    const netBeforeSettlement = amountPaid - sharePerParticipant
+    const position = userPositions?.find(p => p.bill_id === billId && p.user_id === participant.user_id)
+    const calculation = bill.is_advanced
+      ? bill.calculations?.find(calc => calc.user_id === participant.user_id)
+      : undefined
 
-    // Calculate settlements for this user
-    const incomingSettlements = settlements
+    const shareAmount = calculation
+      ? calculation.owed_paisa / 100
+      : position?.share_amount ?? sharePerParticipant
+
+    const amountPaid = calculation
+      ? calculation.covered_paisa / 100
+      : position?.amount_paid ?? (payers.find(p => p.user_id === participant.user_id)?.amount_paid || 0)
+
+    const incomingSettlements = position?.incoming_settlements ?? settlements
       .filter(s => s.to_user === participant.user_id)
       .reduce((sum, s) => sum + s.amount, 0)
 
-    const outgoingSettlements = settlements
+    const outgoingSettlements = position?.outgoing_settlements ?? settlements
       .filter(s => s.from_user === participant.user_id)
       .reduce((sum, s) => sum + s.amount, 0)
 
-    const netAfterSettlement = netBeforeSettlement + incomingSettlements - outgoingSettlements
+    const netBeforeSettlement = calculation
+      ? calculation.net_paisa / 100
+      : position?.net_before_settlement ?? (amountPaid - shareAmount)
+
+    const netAfterSettlement = position?.net_after_settlement
+      ?? (netBeforeSettlement + incomingSettlements - outgoingSettlements)
 
     return {
       ...participant,
-      shareAmount: sharePerParticipant,
+      shareAmount,
       amountPaid,
       netBeforeSettlement,
       incomingSettlements,

@@ -13,7 +13,8 @@ import {
   PaymentMethod,
   User,
   CreateAdvanceBillData,
-  AdvanceBillPreview
+  AdvanceBillPreview,
+  AdvanceBillCalculation
 } from '@/types'
 
 export interface RoomService {
@@ -433,6 +434,43 @@ export const billService: BillService = {
         return { data: null, error }
       }
 
+      if (data?.is_advanced) {
+        const { data: calculationsData, error: calculationsError } = await supabase
+          .from('bill_calculations')
+          .select(`
+            bill_id,
+            user_id,
+            owed_paisa,
+            covered_paisa,
+            net_paisa,
+            remaining_paisa,
+            last_updated,
+            profile:profiles!bill_calculations_user_id_fkey (
+              id,
+              full_name,
+              avatar_url
+            )
+          `)
+          .eq('bill_id', billId)
+
+        if (calculationsError) {
+          console.error('Error fetching calculations for bill:', calculationsError)
+        } else if (data) {
+          const calculations = (calculationsData || []).map(calc => ({
+            bill_id: calc.bill_id,
+            user_id: calc.user_id,
+            owed_paisa: Number(calc.owed_paisa) || 0,
+            covered_paisa: Number(calc.covered_paisa) || 0,
+            net_paisa: Number(calc.net_paisa) || 0,
+            remaining_paisa: Number(calc.remaining_paisa) || 0,
+            last_updated: calc.last_updated,
+            profile: Array.isArray(calc.profile) ? calc.profile[0] : calc.profile
+          })) as AdvanceBillCalculation[]
+
+          ;(data as unknown as Bill).calculations = calculations
+        }
+      }
+
       return { data: data as unknown as Bill, error: null }
     } catch (err) {
       console.error('Get bill details error:', err)
@@ -706,6 +744,58 @@ export const billService: BillService = {
       if (settlementError) {
         console.error('Error creating settlement:', settlementError)
         return { data: null, error: settlementError }
+      }
+
+      // Update calculated balances to reflect the settlement for advanced bills
+      const settlementAmount = Number(data.amount)
+      const amountPaisa = Math.round(settlementAmount * 100)
+
+      if (!Number.isFinite(amountPaisa)) {
+        console.warn('Skipping calculation update due to invalid settlement amount:', data.amount)
+      } else {
+        const { data: calculationRows, error: calculationFetchError } = await supabase
+          .from('bill_calculations')
+          .select('user_id, remaining_paisa, net_paisa')
+          .eq('bill_id', data.bill_id)
+          .in('user_id', [data.from_user, data.to_user])
+
+        if (calculationFetchError) {
+          console.error('Error fetching bill calculations for settlement update:', calculationFetchError)
+        } else if (calculationRows && calculationRows.length > 0) {
+          const timestamp = new Date().toISOString()
+
+          for (const calcRow of calculationRows) {
+            const currentRemaining = Number(calcRow.remaining_paisa) || 0
+            const currentNet = Number(calcRow.net_paisa) || 0
+            const isPayer = calcRow.user_id === data.from_user
+            const isReceiver = calcRow.user_id === data.to_user
+
+            if (!isPayer && !isReceiver) {
+              continue
+            }
+
+            let updatedRemaining = currentRemaining + (isPayer ? amountPaisa : -amountPaisa)
+
+            if (currentNet < 0) {
+              updatedRemaining = Math.min(updatedRemaining, 0)
+            } else if (currentNet > 0) {
+              updatedRemaining = Math.max(updatedRemaining, 0)
+            }
+
+            const { error: updateError } = await supabase
+              .from('bill_calculations')
+              .update({
+                remaining_paisa: Math.round(updatedRemaining),
+                last_updated: timestamp
+              })
+              .eq('bill_id', data.bill_id)
+              .eq('user_id', calcRow.user_id)
+
+            if (updateError) {
+              console.error('Error updating bill calculations after settlement:', updateError)
+            }
+          }
+        }
       }
 
       // Update bill status based on settlement completion

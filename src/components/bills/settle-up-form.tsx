@@ -35,12 +35,26 @@ export function SettleUpForm({ bill, room, currentUserId, onSuccess }: SettleUpF
   // Get current user's position from the database views (this already includes all settlements)
   // net_after_settlement is the final amount: negative = user owes money, positive = user is owed money
   const userPosition = userPositions?.find(p => p.bill_id === bill.id && p.user_id === currentUserId)
-  const userNetDebt = userPosition ? Math.abs(Math.min(0, userPosition.net_after_settlement)) : 0
+  const userCalculation = bill.is_advanced
+    ? bill.calculations?.find(calc => calc.user_id === currentUserId)
+    : undefined
+
+  const calculationRemaining = userCalculation ? userCalculation.remaining_paisa / 100 : undefined
+
+  const userNetDebt = userCalculation
+    ? Math.abs(Math.min(0, calculationRemaining ?? 0))
+    : userPosition
+      ? Math.abs(Math.min(0, userPosition.net_after_settlement))
+      : 0
   const maxSettlementAmount = userNetDebt
 
   // For display purposes
-  const userShare = userPosition?.share_amount || 0
-  const userPaid = userPosition?.amount_paid || 0
+  const userShare = userCalculation
+    ? userCalculation.owed_paisa / 100
+    : userPosition?.share_amount || 0
+  const userPaid = userCalculation
+    ? userCalculation.covered_paisa / 100
+    : userPosition?.amount_paid || 0
 
   // Form state
   const [amount, setAmount] = useState(maxSettlementAmount.toString())
