@@ -16,6 +16,7 @@ import {
   AdvanceBillPreview,
   AdvanceBillCalculation
 } from '@/types'
+import { deriveSuggestedTransfersFromCalculations } from './settlement-utils'
 
 export interface RoomService {
   getUserRooms: (userId: string) => Promise<{ data: Room[] | null; error: unknown }>
@@ -869,6 +870,43 @@ export const billService: BillService = {
         if (billError || !bill) {
           console.error('Error fetching bill details:', billError)
           continue
+        }
+
+        if (bill.is_advanced && bill.calculations && bill.calculations.length > 0) {
+          const transfers = deriveSuggestedTransfersFromCalculations(bill.calculations, bill.id)
+          const userTransfers = transfers.filter(transfer => transfer.from_user_id === userId)
+
+          if (userTransfers.length > 0) {
+            const recipients = userTransfers.map(transfer => {
+              const profile =
+                bill.calculations?.find(calc => calc.user_id === transfer.to_user_id)?.profile ||
+                bill.participants?.find(p => p.user_id === transfer.to_user_id)?.profile ||
+                bill.payers?.find(payer => payer.user_id === transfer.to_user_id)?.profile
+
+              return {
+                user_id: transfer.to_user_id,
+                user_name: profile?.full_name || 'User',
+                amount_to_receive: Number(transfer.amount_paisa || 0) / 100
+              }
+            }).filter(recipient => recipient.amount_to_receive > 0)
+
+            const totalOwed = userTransfers.reduce(
+              (sum, transfer) => sum + Number(transfer.amount_paisa || 0),
+              0
+            ) / 100
+
+            if (recipients.length > 0 && totalOwed > 0) {
+              opportunities.push({
+                bill_id: position.bill_id,
+                bill_title: bill.title,
+                currency: bill.currency,
+                amount_owed: totalOwed,
+                recipients
+              })
+            }
+
+            continue
+          }
         }
 
         // Find creditors for this bill (people with positive net_after_settlement)

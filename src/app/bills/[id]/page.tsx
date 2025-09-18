@@ -115,6 +115,15 @@ export default function BillDetailsPage() {
   }
 
   const userPosition = getUserPosition()
+  const userCalculation = bill.is_advanced
+    ? bill.calculations?.find(calc => calc.user_id === user.id)
+    : undefined
+  const userShareAmount = userCalculation
+    ? userCalculation.owed_paisa / 100
+    : userPosition?.share_amount ?? 0
+  const userPaidAmount = userCalculation
+    ? userCalculation.covered_paisa / 100
+    : userPosition?.amount_paid ?? 0
   const participants = bill.participants || []
   const payers = bill.payers || []
   const settlements = bill.settlements || []
@@ -276,7 +285,7 @@ export default function BillDetailsPage() {
                         <div className="text-center p-3 bg-blue-50 rounded-lg">
                           <p className="text-sm text-gray-600 mb-1">Your Share</p>
                           <CurrencyDisplay
-                            amount={userPosition.share_amount}
+                            amount={userShareAmount}
                             currency={bill.currency}
                             className="font-semibold text-blue-600"
                           />
@@ -284,7 +293,7 @@ export default function BillDetailsPage() {
                         <div className="text-center p-3 bg-green-50 rounded-lg">
                           <p className="text-sm text-gray-600 mb-1">You Paid</p>
                           <CurrencyDisplay
-                            amount={userPosition.amount_paid}
+                            amount={userPaidAmount}
                             currency={bill.currency}
                             className="font-semibold text-green-600"
                           />
