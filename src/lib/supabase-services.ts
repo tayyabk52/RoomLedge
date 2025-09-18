@@ -495,6 +495,27 @@ export const billService: BillService = {
 
   async getUserOverallNet(roomId: string, userId: string) {
     try {
+      const { data: normalizedPositions, error: positionsError } = await this.getUserPosition(roomId, userId)
+
+      if (positionsError) {
+        console.error('Error fetching user positions for overall net:', positionsError)
+      }
+
+      if (normalizedPositions) {
+        const overallNet = roundCurrency(
+          normalizedPositions.reduce((sum, position) => sum + toNumber(position.net_after_settlement), 0)
+        )
+
+        return {
+          data: {
+            room_id: roomId,
+            user_id: userId,
+            overall_net: overallNet
+          } as unknown as RoomOverallNet,
+          error: null
+        }
+      }
+
       const { data, error } = await supabase
         .from('v_room_overall_net')
         .select('*')
@@ -507,7 +528,6 @@ export const billService: BillService = {
         return { data: null, error }
       }
 
-      // Return default net value if no data (user has no bills yet)
       if (!data) {
         return {
           data: {
@@ -1212,11 +1232,32 @@ export const billService: BillService = {
         return { data: null, error: billError }
       }
 
-      // Check if bill is fully settled using the unified calculations view.
-      // Any participant with a non-zero net_after_settlement (beyond rounding tolerance)
-      // means there are still outstanding balances on this bill.
-      const hasOutstandingDebts =
-        userPositions?.some(position => Math.abs(Number(position.net_after_settlement) || 0) > 0.01) || false
+      // Check if bill is fully settled. For advanced bills we rely on the
+      // calculation table (which is already updated in paisa) so we can detect
+      // any remaining balance precisely. For classic bills we normalize the
+      // unified view output to ensure outgoing settlements reduce the debt
+      // instead of doubling it.
+      let hasOutstandingDebts = false
+
+      if (billDetails.is_advanced) {
+        const calculations = billDetails.calculations || []
+
+        if (calculations.length > 0) {
+          hasOutstandingDebts = calculations.some(calc => {
+            const remainingAmount = roundCurrency(
+              toNumber(calc.remaining_paisa) / CURRENCY_ROUNDING_FACTOR
+            )
+            return Math.abs(remainingAmount) > CURRENCY_TOLERANCE
+          })
+        } else {
+          hasOutstandingDebts =
+            userPositions?.some(position => Math.abs(toNumber(position.net_after_settlement)) > CURRENCY_TOLERANCE) ??
+            false
+        }
+      } else {
+        hasOutstandingDebts =
+          userPositions?.some(position => Math.abs(normalizeSimpleNetAfter(position)) > CURRENCY_TOLERANCE) ?? false
+      }
       const hasSettlements = billDetails.settlements && billDetails.settlements.length > 0
 
       // Determine new status
