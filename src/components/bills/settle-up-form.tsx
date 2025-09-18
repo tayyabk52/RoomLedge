@@ -117,13 +117,13 @@ export function SettleUpForm({ bill, room, currentUserId, onSuccess }: SettleUpF
     try {
       // Create settlements for each recipient
       // IMPORTANT: When a debtor pays a creditor, the settlement is recorded as
-      // the creditor giving the debtor credit (from_user: creditor, to_user: debtor)
-      // This creates an incoming_settlement for the debtor, reducing their debt
+      // the debtor paying the creditor (from_user: debtor, to_user: creditor)
+      // This creates an outgoing_settlement for the debtor, reducing their debt
       for (const recipient of recipients) {
         const settlementData: CreateSettlementData = {
           bill_id: bill.id,
-          from_user: recipient.userId, // Creditor is giving credit
-          to_user: currentUserId,      // Debtor is receiving credit
+          from_user: currentUserId,     // Debtor is paying
+          to_user: recipient.userId,   // Creditor is receiving
           amount: recipient.amount,
           method: selectedMethod,
           note: note || undefined

@@ -327,7 +327,7 @@ export const billService: BillService = {
       const billIdArray = billIds?.map(bill => bill.id) || []
 
       const { data, error } = await supabase
-        .from('v_bill_user_position')
+        .from('v_unified_bill_user_position')
         .select('*')
         .eq('user_id', userId)
         .in('bill_id', billIdArray)
@@ -761,7 +761,7 @@ export const billService: BillService = {
 
       // Get all user positions for the room to find creditors
       const { data: allUserPositions, error: allPositionsError } = await supabase
-        .from('v_bill_user_position')
+        .from('v_unified_bill_user_position')
         .select('*')
         .in('bill_id', billsOwed.map(b => b.bill_id))
 
