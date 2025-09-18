@@ -7,7 +7,7 @@ import { useAuth } from './use-auth'
 
 export function useUpdateProfile() {
   const queryClient = useQueryClient()
-  const { refreshProfile } = useAuth()
+  const { actions: { refreshProfile } } = useAuth()
 
   return useMutation({
     mutationFn: ({ userId, data }: { userId: string; data: UpdateProfileData }) =>
@@ -33,7 +33,7 @@ export function useUpdateProfile() {
 
 export function useUploadAvatar() {
   const queryClient = useQueryClient()
-  const { refreshProfile } = useAuth()
+  const { actions: { refreshProfile } } = useAuth()
 
   return useMutation({
     mutationFn: ({ userId, file }: { userId: string; file: File }) =>
@@ -59,7 +59,7 @@ export function useUploadAvatar() {
 
 export function useDeleteAvatar() {
   const queryClient = useQueryClient()
-  const { refreshProfile } = useAuth()
+  const { actions: { refreshProfile } } = useAuth()
 
   return useMutation({
     mutationFn: (userId: string) => profileService.deleteAvatar(userId),

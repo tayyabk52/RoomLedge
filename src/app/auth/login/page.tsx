@@ -27,7 +27,7 @@ type LoginForm = z.infer<typeof loginSchema>
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
-  const { signIn, user, profile, initialized } = useAuth()
+  const { actions: { signIn }, user, profile, initialized } = useAuth()
   const router = useRouter()
 
   const form = useForm<LoginForm>({
