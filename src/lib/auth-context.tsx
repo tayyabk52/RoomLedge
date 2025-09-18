@@ -18,6 +18,7 @@ type AuthSubscription = ReturnType<typeof supabase.auth.onAuthStateChange>['data
 
 interface AuthActions {
   signIn: (email: string, password: string) => ReturnType<typeof authService.signIn>
+  signInWithGoogle: () => ReturnType<typeof authService.signInWithGoogle>
   signUp: (email: string, password: string, fullName: string) => ReturnType<typeof authService.signUp>
   signOut: () => ReturnType<typeof authService.signOut>
   refreshProfile: () => Promise<void>
@@ -209,6 +210,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const signInWithGoogle = useCallback(async () => {
+    setState(prev => ({ ...prev, loading: true }))
+
+    try {
+      const result = await authService.signInWithGoogle()
+      return result
+    } finally {
+      setState(prev => ({ ...prev, loading: false }))
+    }
+  }, [])
+
   const signOut = useCallback(async () => {
     setState(prev => ({ ...prev, loading: true }))
 
@@ -229,10 +241,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const actions = useMemo<AuthActions>(() => ({
     signIn,
+    signInWithGoogle,
     signUp,
     signOut,
     refreshProfile,
-  }), [signIn, signUp, signOut, refreshProfile])
+  }), [signIn, signInWithGoogle, signUp, signOut, refreshProfile])
 
   const value = useMemo<AuthContextValue>(() => ({
     user: state.user,

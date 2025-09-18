@@ -23,6 +23,30 @@ export interface AuthResponse<T = unknown> {
 }
 
 export const authService = {
+  async signInWithGoogle(): Promise<AuthResponse> {
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/dashboard`
+        }
+      })
+
+      if (error) {
+        return { data: null, error: { message: error.message } }
+      }
+
+      return { data, error: null }
+    } catch (err) {
+      return {
+        data: null,
+        error: {
+          message: err instanceof Error ? err.message : 'An unexpected error occurred'
+        }
+      }
+    }
+  },
+
   async signIn({ email, password }: SignInCredentials): Promise<AuthResponse> {
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -130,10 +154,21 @@ export const authService = {
         const { data: { user } } = await supabase.auth.getUser()
         if (user && user.id === userId) {
           // Create profile from user metadata with conflict handling
+          // Handle both manual signup and OAuth (Google) user metadata
+          const fullName = user.user_metadata?.full_name ||
+                          user.user_metadata?.name ||
+                          `${user.user_metadata?.first_name || ''} ${user.user_metadata?.last_name || ''}`.trim() ||
+                          user.email?.split('@')[0] ||
+                          'User'
+
+          const avatarUrl = user.user_metadata?.avatar_url ||
+                           user.user_metadata?.picture ||
+                           null
+
           const profileData = {
             id: userId,
-            full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
-            avatar_url: user.user_metadata?.avatar_url || null
+            full_name: fullName,
+            avatar_url: avatarUrl
           }
 
           // Use upsert to handle race conditions

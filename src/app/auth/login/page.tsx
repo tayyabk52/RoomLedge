@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { LoadingSpinner } from '@/components/shared/loading-spinner'
+import { GoogleSigninButton } from '@/components/auth/google-signin-button'
 import { useAuth } from '@/hooks/use-auth'
 import { Mail, Lock, ArrowRight, Users } from 'lucide-react'
 import { toast } from 'sonner'
@@ -143,6 +144,23 @@ export default function LoginPage() {
                 <p className="text-gray-600">
                   Sign in to your account to continue
                 </p>
+              </div>
+
+              {/* Google Sign In */}
+              <div className="space-y-4">
+                <GoogleSigninButton
+                  variant="signin"
+                  disabled={isLoading}
+                />
+
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t border-gray-300" />
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="bg-white px-4 text-gray-500">Or continue with email</span>
+                  </div>
+                </div>
               </div>
 
               {/* Form */}

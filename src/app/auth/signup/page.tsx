@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { LoadingSpinner } from '@/components/shared/loading-spinner'
+import { GoogleSigninButton } from '@/components/auth/google-signin-button'
 import { useAuth } from '@/hooks/use-auth'
 import { Mail, Lock, User, ArrowRight, Users, CheckCircle } from 'lucide-react'
 import { toast } from 'sonner'
@@ -132,6 +133,23 @@ export default function SignupPage() {
                 <p className="text-gray-600">
                   Start splitting expenses with your roommates
                 </p>
+              </div>
+
+              {/* Google Sign Up */}
+              <div className="space-y-4">
+                <GoogleSigninButton
+                  variant="signup"
+                  disabled={isLoading}
+                />
+
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t border-gray-300" />
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="bg-white px-4 text-gray-500">Or create account with email</span>
+                  </div>
+                </div>
               </div>
 
               {/* Form */}
