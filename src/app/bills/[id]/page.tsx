@@ -81,7 +81,7 @@ export default function BillDetailsPage() {
   }
 
   const handleSettleBill = () => {
-    router.push(`/bills/${billId}/settle`)
+    router.push('/bills/settle')
   }
 
   const getStatusColor = (status: BillStatus) => {

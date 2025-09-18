@@ -67,8 +67,8 @@ export default function DashboardPage() {
     router.push('/bills/settle')
   }
 
-  const handleSettleBill = (billId: string) => {
-    router.push(`/bills/${billId}/settle`)
+  const handleSettleBill = () => {
+    router.push('/bills/settle')
   }
 
   const handleInviteMember = () => {

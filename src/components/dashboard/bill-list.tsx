@@ -15,7 +15,7 @@ interface BillListProps {
   userPositions: BillUserPosition[]
   currentUserId: string
   onBillClick: (billId: string) => void
-  onSettleBill?: (billId: string) => void
+  onSettleBill?: () => void
   isLoading?: boolean
 }
 
@@ -248,7 +248,7 @@ export function BillList({
                             variant="outline"
                             onClick={(e) => {
                               e.stopPropagation()
-                              onSettleBill(bill.id)
+                              onSettleBill()
                             }}
                             className="h-8 px-3 text-xs font-medium rounded-full border-orange-200 bg-orange-50 text-orange-600 hover:bg-orange-100 hover:border-orange-300 transition-all duration-200"
                           >
