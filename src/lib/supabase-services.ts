@@ -13,8 +13,10 @@ import {
   PaymentMethod,
   User,
   CreateAdvanceBillData,
-  AdvanceBillPreview
+  AdvanceBillPreview,
+  AdvanceBillCalculation
 } from '@/types'
+import { deriveSuggestedTransfersFromCalculations } from './settlement-utils'
 
 export interface RoomService {
   getUserRooms: (userId: string) => Promise<{ data: Room[] | null; error: unknown }>
@@ -25,12 +27,12 @@ export interface RoomService {
 }
 
 export interface BillService {
-  getRoomBills: (roomId: string) => Promise<{ data: Bill[] | null; error: unknown }>
+  getRoomBills: (roomId: string, userId: string) => Promise<{ data: Bill[] | null; error: unknown }>
   getUserPosition: (roomId: string, userId: string) => Promise<{ data: BillUserPosition[] | null; error: unknown }>
   getUserOverallNet: (roomId: string, userId: string) => Promise<{ data: RoomOverallNet | null; error: unknown }>
   getBillDetails: (billId: string) => Promise<{ data: Bill | null; error: unknown }>
-  getRoomStatistics: (roomId: string) => Promise<{ data: RoomStatistics | null; error: unknown }>
-  getRecentActivity: (roomId: string, limit?: number) => Promise<{ data: ActivityItem[] | null; error: unknown }>
+  getRoomStatistics: (roomId: string, userId: string) => Promise<{ data: RoomStatistics | null; error: unknown }>
+  getRecentActivity: (roomId: string, userId: string, limit?: number) => Promise<{ data: ActivityItem[] | null; error: unknown }>
   createBill: (data: CreateBillData, userId: string) => Promise<{ data: Bill | null; error: unknown }>
   createSettlement: (data: CreateSettlementData) => Promise<{ data: BillSettlement | null; error: unknown }>
   getSettlementOpportunities: (roomId: string, userId: string) => Promise<{ data: SettlementOpportunity[] | null; error: unknown }>
@@ -81,6 +83,201 @@ function generateRoomCode(): string {
     result += chars.charAt(Math.floor(Math.random() * chars.length))
   }
   return result
+}
+
+const CURRENCY_ROUNDING_FACTOR = 100
+const CURRENCY_TOLERANCE = 0.01
+const SIMPLE_KEY_SEPARATOR = '::'
+
+function toNumber(value: unknown): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0
+  if (typeof value === 'string') {
+    const parsed = parseFloat(value)
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+  return 0
+}
+
+function roundCurrency(value: number): number {
+  return Math.round(value * CURRENCY_ROUNDING_FACTOR) / CURRENCY_ROUNDING_FACTOR
+}
+
+interface SimpleBillContext {
+  share: Map<string, number>
+  paid: Map<string, number>
+}
+
+interface SimplePositionLike {
+  bill_id?: string
+  user_id?: string
+  share_amount?: number
+  amount_paid?: number
+  incoming_settlements?: number
+  outgoing_settlements?: number
+  net_before_settlement?: number
+  net_after_settlement?: number
+}
+
+interface NormalizedSimplePosition {
+  share: number
+  paid: number
+  incoming: number
+  outgoing: number
+  netBefore: number
+  netAfter: number
+}
+
+function makeSimpleKey(billId: string, userId: string) {
+  return `${billId}${SIMPLE_KEY_SEPARATOR}${userId}`
+}
+
+function applySimpleNormalization(
+  position: SimplePositionLike,
+  context?: SimpleBillContext
+): NormalizedSimplePosition {
+  const billId = position.bill_id
+  const userId = position.user_id
+  const key = billId && userId ? makeSimpleKey(billId, userId) : undefined
+
+  const contextShare = key && context ? context.share.get(key) : undefined
+  const contextPaid = key && context ? context.paid.get(key) : undefined
+
+  const share = roundCurrency(
+    contextShare !== undefined ? contextShare : toNumber(position.share_amount)
+  )
+  const paid = roundCurrency(
+    contextPaid !== undefined ? contextPaid : toNumber(position.amount_paid)
+  )
+  const incoming = roundCurrency(toNumber(position.incoming_settlements))
+  const outgoing = roundCurrency(toNumber(position.outgoing_settlements))
+  const netBefore = roundCurrency(paid - share)
+  const netAfter = roundCurrency(netBefore + outgoing - incoming)
+
+  return { share, paid, incoming, outgoing, netBefore, netAfter }
+}
+
+function normalizeSimpleNetAfter(position: SimplePositionLike, context?: SimpleBillContext): number {
+  return applySimpleNormalization(position, context).netAfter
+}
+
+async function buildSimpleBillContext(
+  billIds: string[],
+  billTotals?: Map<string, number>
+): Promise<SimpleBillContext> {
+  const uniqueBillIds = Array.from(new Set(billIds.filter(Boolean)))
+
+  if (uniqueBillIds.length === 0) {
+    return { share: new Map(), paid: new Map() }
+  }
+
+  let totalsMap = billTotals
+
+  if (!totalsMap) {
+    const { data: totalRows, error: totalError } = await supabase
+      .from('bills')
+      .select('id, total_amount')
+      .in('id', uniqueBillIds)
+
+    if (totalError) {
+      console.error('Error fetching bill totals for simple context:', totalError)
+      totalsMap = new Map()
+    } else {
+      totalsMap = new Map(
+        (totalRows || []).map(row => [row.id, toNumber(row.total_amount)])
+      )
+    }
+  }
+
+  const { data: participantRows, error: participantError } = await supabase
+    .from('bill_participants')
+    .select('bill_id, user_id')
+    .in('bill_id', uniqueBillIds)
+
+  if (participantError) {
+    console.error('Error fetching participants for simple context:', participantError)
+    return { share: new Map(), paid: new Map() }
+  }
+
+  const { data: payerRows, error: payerError } = await supabase
+    .from('bill_payers')
+    .select('bill_id, user_id, amount_paid')
+    .in('bill_id', uniqueBillIds)
+
+  if (payerError) {
+    console.error('Error fetching payers for simple context:', payerError)
+  }
+
+  const participantsByBill = new Map<string, string[]>()
+  ;(participantRows || []).forEach(row => {
+    if (!row?.bill_id || !row?.user_id) return
+    const existing = participantsByBill.get(row.bill_id) || []
+    existing.push(row.user_id)
+    participantsByBill.set(row.bill_id, existing)
+  })
+
+  const paidMap = new Map<string, number>()
+  ;(payerRows || []).forEach(row => {
+    if (!row?.bill_id || !row?.user_id) return
+    paidMap.set(makeSimpleKey(row.bill_id, row.user_id), roundCurrency(toNumber(row.amount_paid)))
+  })
+
+  const shareMap = new Map<string, number>()
+
+  participantsByBill.forEach((userIds, billId) => {
+    const total = totalsMap?.get(billId) ?? 0
+    const participantCount = userIds.length
+    const divisor = participantCount <= 1 ? 1 : participantCount - 1
+
+    userIds.forEach(userId => {
+      const key = makeSimpleKey(billId, userId)
+      const amountPaid = paidMap.get(key) ?? 0
+      let share = participantCount <= 1 ? total : (total - amountPaid) / divisor
+
+      if (!Number.isFinite(share)) {
+        share = 0
+      }
+
+      share = roundCurrency(Math.max(0, share))
+      shareMap.set(key, share)
+
+      if (!paidMap.has(key)) {
+        paidMap.set(key, 0)
+      }
+    })
+  })
+
+  return { share: shareMap, paid: paidMap }
+}
+
+function buildSimpleContextFromBill(bill: Bill): SimpleBillContext {
+  const participantIds = bill.participants?.map(p => p.user_id).filter(Boolean) ?? []
+  const paidMap = new Map<string, number>()
+  const totalAmount = toNumber(bill.total_amount)
+
+  bill.payers?.forEach(payer => {
+    if (!payer?.user_id) return
+    paidMap.set(makeSimpleKey(bill.id, payer.user_id), roundCurrency(toNumber(payer.amount_paid)))
+  })
+
+  const shareMap = new Map<string, number>()
+  const participantCount = participantIds.length
+  const divisor = participantCount <= 1 ? 1 : participantCount - 1
+
+  participantIds.forEach(userId => {
+    const key = makeSimpleKey(bill.id, userId)
+    const paid = paidMap.get(key) ?? 0
+    let share = participantCount <= 1 ? totalAmount : (totalAmount - paid) / divisor
+
+    if (!Number.isFinite(share)) {
+      share = 0
+    }
+
+    share = roundCurrency(Math.max(0, share))
+    shareMap.set(key, share)
+    paidMap.set(key, roundCurrency(paid))
+  })
+
+  return { share: shareMap, paid: paidMap }
 }
 
 export const roomService: RoomService = {
@@ -253,8 +450,24 @@ export const roomService: RoomService = {
 }
 
 export const billService: BillService = {
-  async getRoomBills(roomId: string) {
+  async getRoomBills(roomId: string, userId: string) {
     try {
+      const { data: participantRows, error: participantsError } = await supabase
+        .from('bill_participants')
+        .select('bill_id')
+        .eq('user_id', userId)
+
+      if (participantsError) {
+        console.error('Error fetching participant bills:', participantsError)
+        return { data: null, error: participantsError }
+      }
+
+      const participantBillIds = Array.from(new Set((participantRows || []).map(row => row.bill_id).filter(Boolean)))
+
+      if (participantBillIds.length === 0) {
+        return { data: [], error: null }
+      }
+
       const { data, error } = await supabase
         .from('bills')
         .select(`
@@ -297,6 +510,7 @@ export const billService: BillService = {
           )
         `)
         .eq('room_id', roomId)
+        .in('id', participantBillIds)
         .order('created_at', { ascending: false })
 
       if (error) {
@@ -313,18 +527,51 @@ export const billService: BillService = {
 
   async getUserPosition(roomId: string, userId: string) {
     try {
-      // First get all bill IDs for the room
-      const { data: billIds, error: billError } = await supabase
+      const { data: participantRows, error: participantsError } = await supabase
+        .from('bill_participants')
+        .select('bill_id')
+        .eq('user_id', userId)
+
+      if (participantsError) {
+        console.error('Error fetching participant bill ids:', participantsError)
+        return { data: null, error: participantsError }
+      }
+
+      const participantBillIds = Array.from(new Set((participantRows || []).map(row => row.bill_id).filter(Boolean)))
+
+      if (participantBillIds.length === 0) {
+        return { data: [], error: null }
+      }
+
+      const { data: billRows, error: billError } = await supabase
         .from('bills')
-        .select('id')
+        .select('id, is_advanced, total_amount')
         .eq('room_id', roomId)
+        .in('id', participantBillIds)
 
       if (billError) {
-        console.error('Error fetching bill IDs:', billError)
+        console.error('Error filtering bills for user position:', billError)
         return { data: null, error: billError }
       }
 
-      const billIdArray = billIds?.map(bill => bill.id) || []
+      const relevantBills = billRows || []
+      const billIdArray = relevantBills.map(bill => bill.id)
+
+      if (billIdArray.length === 0) {
+        return { data: [], error: null }
+      }
+
+      const isAdvancedMap = new Map<string, boolean>()
+      const simpleBillTotals = new Map<string, number>()
+      relevantBills.forEach(bill => {
+        if (bill?.id) {
+          const advanced = !!bill.is_advanced
+          isAdvancedMap.set(bill.id, advanced)
+          if (!advanced) {
+            simpleBillTotals.set(bill.id, toNumber((bill as { total_amount?: number }).total_amount))
+          }
+        }
+      })
 
       const { data, error } = await supabase
         .from('v_unified_bill_user_position')
@@ -337,7 +584,74 @@ export const billService: BillService = {
         return { data: null, error }
       }
 
-      return { data: data as unknown as BillUserPosition[], error: null }
+      const advancedBillIds = billIdArray.filter(id => isAdvancedMap.get(id))
+      const calculationsMap = new Map<string, {
+        owed_paisa: number
+        covered_paisa: number
+        net_paisa: number
+        remaining_paisa: number
+      }>()
+
+      if (advancedBillIds.length > 0) {
+        const { data: calculationRows, error: calculationsError } = await supabase
+          .from('bill_calculations')
+          .select('bill_id, user_id, owed_paisa, covered_paisa, net_paisa, remaining_paisa')
+          .eq('user_id', userId)
+          .in('bill_id', advancedBillIds)
+
+        if (calculationsError) {
+          console.error('Error fetching calculations for user position:', calculationsError)
+        } else {
+          (calculationRows || []).forEach(row => {
+            calculationsMap.set(row.bill_id, {
+              owed_paisa: toNumber(row.owed_paisa),
+              covered_paisa: toNumber(row.covered_paisa),
+              net_paisa: toNumber(row.net_paisa),
+              remaining_paisa: toNumber(row.remaining_paisa)
+            })
+          })
+        }
+      }
+
+      const simpleBillIds = billIdArray.filter(id => !isAdvancedMap.get(id))
+      let simpleContext: SimpleBillContext | undefined
+
+      if (simpleBillIds.length > 0) {
+        simpleContext = await buildSimpleBillContext(simpleBillIds, simpleBillTotals)
+      }
+
+      const normalizedPositions = (data || []).map(position => {
+        const billId = position.bill_id as string
+        const isAdvanced = !!isAdvancedMap.get(billId)
+        const incoming = toNumber(position.incoming_settlements)
+        const outgoing = toNumber(position.outgoing_settlements)
+
+        if (isAdvanced && calculationsMap.has(billId)) {
+          const calc = calculationsMap.get(billId)!
+          return {
+            ...position,
+            share_amount: roundCurrency(calc.owed_paisa / CURRENCY_ROUNDING_FACTOR),
+            amount_paid: roundCurrency(calc.covered_paisa / CURRENCY_ROUNDING_FACTOR),
+            incoming_settlements: roundCurrency(incoming),
+            outgoing_settlements: roundCurrency(outgoing),
+            net_before_settlement: roundCurrency(calc.net_paisa / CURRENCY_ROUNDING_FACTOR),
+            net_after_settlement: roundCurrency(calc.remaining_paisa / CURRENCY_ROUNDING_FACTOR)
+          } as unknown as BillUserPosition
+        }
+
+        const normalized = applySimpleNormalization(position, simpleContext)
+        return {
+          ...position,
+          share_amount: normalized.share,
+          amount_paid: normalized.paid,
+          incoming_settlements: normalized.incoming,
+          outgoing_settlements: normalized.outgoing,
+          net_before_settlement: normalized.netBefore,
+          net_after_settlement: normalized.netAfter
+        } as unknown as BillUserPosition
+      })
+
+      return { data: normalizedPositions, error: null }
     } catch (err) {
       console.error('Get user position error:', err)
       return { data: null, error: err }
@@ -346,6 +660,27 @@ export const billService: BillService = {
 
   async getUserOverallNet(roomId: string, userId: string) {
     try {
+      const { data: normalizedPositions, error: positionsError } = await this.getUserPosition(roomId, userId)
+
+      if (positionsError) {
+        console.error('Error fetching user positions for overall net:', positionsError)
+      }
+
+      if (normalizedPositions) {
+        const overallNet = roundCurrency(
+          normalizedPositions.reduce((sum, position) => sum + toNumber(position.net_after_settlement), 0)
+        )
+
+        return {
+          data: {
+            room_id: roomId,
+            user_id: userId,
+            overall_net: overallNet
+          } as unknown as RoomOverallNet,
+          error: null
+        }
+      }
+
       const { data, error } = await supabase
         .from('v_room_overall_net')
         .select('*')
@@ -358,7 +693,6 @@ export const billService: BillService = {
         return { data: null, error }
       }
 
-      // Return default net value if no data (user has no bills yet)
       if (!data) {
         return {
           data: {
@@ -433,6 +767,43 @@ export const billService: BillService = {
         return { data: null, error }
       }
 
+      if (data?.is_advanced) {
+        const { data: calculationsData, error: calculationsError } = await supabase
+          .from('bill_calculations')
+          .select(`
+            bill_id,
+            user_id,
+            owed_paisa,
+            covered_paisa,
+            net_paisa,
+            remaining_paisa,
+            last_updated,
+            profile:profiles!bill_calculations_user_id_fkey (
+              id,
+              full_name,
+              avatar_url
+            )
+          `)
+          .eq('bill_id', billId)
+
+        if (calculationsError) {
+          console.error('Error fetching calculations for bill:', calculationsError)
+        } else if (data) {
+          const calculations = (calculationsData || []).map(calc => ({
+            bill_id: calc.bill_id,
+            user_id: calc.user_id,
+            owed_paisa: Number(calc.owed_paisa) || 0,
+            covered_paisa: Number(calc.covered_paisa) || 0,
+            net_paisa: Number(calc.net_paisa) || 0,
+            remaining_paisa: Number(calc.remaining_paisa) || 0,
+            last_updated: calc.last_updated,
+            profile: Array.isArray(calc.profile) ? calc.profile[0] : calc.profile
+          })) as AdvanceBillCalculation[]
+
+          ;(data as unknown as Bill).calculations = calculations
+        }
+      }
+
       return { data: data as unknown as Bill, error: null }
     } catch (err) {
       console.error('Get bill details error:', err)
@@ -440,31 +811,8 @@ export const billService: BillService = {
     }
   },
 
-  async getRoomStatistics(roomId: string) {
+  async getRoomStatistics(roomId: string, userId: string) {
     try {
-      // Get bills count and totals
-      const { data: billsData, error: billsError } = await supabase
-        .from('bills')
-        .select('id, total_amount, status, currency')
-        .eq('room_id', roomId)
-
-      if (billsError) {
-        console.error('Error fetching bills for statistics:', billsError)
-        return { data: null, error: billsError }
-      }
-
-      // Get room members count
-      const { count: membersCount, error: membersError } = await supabase
-        .from('room_members')
-        .select('*', { count: 'exact', head: true })
-        .eq('room_id', roomId)
-
-      if (membersError) {
-        console.error('Error fetching members count:', membersError)
-        return { data: null, error: membersError }
-      }
-
-      // Get room currency
       const { data: roomData, error: roomError } = await supabase
         .from('rooms')
         .select('base_currency')
@@ -476,19 +824,70 @@ export const billService: BillService = {
         return { data: null, error: roomError }
       }
 
-      // Calculate statistics with edge case handling
+      const { data: participantRows, error: participantsError } = await supabase
+        .from('bill_participants')
+        .select('bill_id')
+        .eq('user_id', userId)
+
+      if (participantsError) {
+        console.error('Error fetching participant bills for statistics:', participantsError)
+        return { data: null, error: participantsError }
+      }
+
+      const participantBillIds = Array.from(new Set((participantRows || []).map(row => row.bill_id).filter(Boolean)))
+
+      if (participantBillIds.length === 0) {
+        const emptyStats: RoomStatistics = {
+          total_bills: 0,
+          total_amount: 0,
+          settled_bills: 0,
+          open_bills: 0,
+          total_members: 0,
+          currency: roomData?.base_currency || 'PKR'
+        }
+        return { data: emptyStats, error: null }
+      }
+
+      const { data: billsData, error: billsError } = await supabase
+        .from('bills')
+        .select('id, total_amount, status, currency')
+        .eq('room_id', roomId)
+        .in('id', participantBillIds)
+
+      if (billsError) {
+        console.error('Error fetching bills for statistics:', billsError)
+        return { data: null, error: billsError }
+      }
+
+      const relevantBillIds = (billsData || []).map(bill => bill.id)
+      const { data: participantData, error: participantCountError } = await supabase
+        .from('bill_participants')
+        .select('user_id, bill_id')
+        .in('bill_id', relevantBillIds)
+
+      if (participantCountError) {
+        console.error('Error fetching participant details for statistics:', participantCountError)
+      }
+
+      const participantSet = new Set<string>()
+      ;(participantData || []).forEach(row => {
+        if (row?.user_id) {
+          participantSet.add(row.user_id)
+        }
+      })
+
       const bills = billsData || []
       const totalBills = bills.length
-      const totalAmount = bills.reduce((sum, bill) => sum + Number(bill.total_amount), 0)
+      const totalAmount = bills.reduce((sum, bill) => sum + toNumber(bill.total_amount), 0)
       const settledBills = bills.filter(bill => bill.status === 'settled').length
       const openBills = bills.filter(bill => bill.status === 'open').length
 
       const statistics: RoomStatistics = {
         total_bills: totalBills,
-        total_amount: totalAmount,
+        total_amount: roundCurrency(totalAmount),
         settled_bills: settledBills,
         open_bills: openBills,
-        total_members: membersCount || 0,
+        total_members: participantSet.size,
         currency: roomData?.base_currency || 'PKR'
       }
 
@@ -499,11 +898,29 @@ export const billService: BillService = {
     }
   },
 
-  async getRecentActivity(roomId: string, limit: number = 10) {
+  async getRecentActivity(roomId: string, userId: string, limit: number = 10) {
     try {
       const activities: ActivityItem[] = []
 
-      // Get recent bills
+      const { data: participantRows, error: participantsError } = await supabase
+        .from('bill_participants')
+        .select('bill_id')
+        .eq('user_id', userId)
+
+      if (participantsError) {
+        console.error('Error fetching participant bills for activity:', participantsError)
+        return { data: null, error: participantsError }
+      }
+
+      const participantBillIds = Array.from(new Set((participantRows || []).map(row => row.bill_id).filter(Boolean)))
+
+      if (participantBillIds.length === 0) {
+        return { data: [], error: null }
+      }
+
+      const billLimit = Math.ceil(limit / 2)
+
+      // Get recent bills the user participates in
       const { data: billsData, error: billsError } = await supabase
         .from('bills')
         .select(`
@@ -517,8 +934,9 @@ export const billService: BillService = {
           created_at
         `)
         .eq('room_id', roomId)
+        .in('id', participantBillIds)
         .order('created_at', { ascending: false })
-        .limit(Math.ceil(limit / 2))
+        .limit(billLimit)
 
       if (billsError) {
         console.error('Error fetching bills for activity:', billsError)
@@ -533,48 +951,33 @@ export const billService: BillService = {
         })
       }
 
-      // Get recent settlements - using a different approach to filter by room
-      const { data: roomBillIds } = await supabase
-        .from('bills')
-        .select('id')
-        .eq('room_id', roomId)
-
-      let settlementsData = null
-      let settlementsError = null
-
-      if (roomBillIds && roomBillIds.length > 0) {
-        const billIds = roomBillIds.map(bill => bill.id)
-
-        const { data, error } = await supabase
-          .from('bill_settlements')
-          .select(`
+      // Get recent settlements involving those bills
+      const { data: settlementsData, error: settlementsError } = await supabase
+        .from('bill_settlements')
+        .select(`
+          id,
+          amount,
+          method,
+          settled_at,
+          bill_id,
+          from_profile:profiles!bill_settlements_from_user_fkey (
             id,
-            amount,
-            method,
-            settled_at,
-            bill_id,
-            from_profile:profiles!bill_settlements_from_user_fkey (
-              id,
-              full_name,
-              avatar_url
-            ),
-            to_profile:profiles!bill_settlements_to_user_fkey (
-              id,
-              full_name,
-              avatar_url
-            ),
-            bill:bills (
-              title,
-              currency
-            )
-          `)
-          .in('bill_id', billIds)
-          .order('settled_at', { ascending: false })
-          .limit(Math.ceil(limit / 2))
-
-        settlementsData = data
-        settlementsError = error
-      }
+            full_name,
+            avatar_url
+          ),
+          to_profile:profiles!bill_settlements_to_user_fkey (
+            id,
+            full_name,
+            avatar_url
+          ),
+          bill:bills (
+            title,
+            currency
+          )
+        `)
+        .in('bill_id', participantBillIds)
+        .order('settled_at', { ascending: false })
+        .limit(billLimit)
 
       if (settlementsError) {
         console.error('Error fetching settlements for activity:', settlementsError)
@@ -599,7 +1002,6 @@ export const billService: BillService = {
         })
       }
 
-      // Sort by date and limit
       activities.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
       const limitedActivities = activities.slice(0, limit)
 
@@ -672,6 +1074,36 @@ export const billService: BillService = {
         }
       }
 
+      // Auto-settle evenly split bills when everyone has already covered their share
+      const participantCount = data.participants.length
+
+      if (participantCount > 0) {
+        const sharePerParticipant = roundCurrency(toNumber(bill.total_amount) / participantCount)
+        const payerMap = new Map<string, number>()
+
+        data.payers.forEach(payer => {
+          payerMap.set(payer.user_id, roundCurrency(toNumber(payer.amount_paid)))
+        })
+
+        const isFullySettled = data.participants.every(participantId => {
+          const paid = roundCurrency(payerMap.get(participantId) || 0)
+          return Math.abs(paid - sharePerParticipant) <= CURRENCY_TOLERANCE
+        })
+
+        if (isFullySettled) {
+          const { error: statusError } = await supabase
+            .from('bills')
+            .update({ status: 'settled' })
+            .eq('id', bill.id)
+
+          if (statusError) {
+            console.error('Error auto-settling even bill:', statusError)
+          } else {
+            bill.status = 'settled'
+          }
+        }
+      }
+
       // Fetch the complete bill with relations
       const { data: completeBill, error: fetchError } = await this.getBillDetails(bill.id)
 
@@ -706,6 +1138,58 @@ export const billService: BillService = {
       if (settlementError) {
         console.error('Error creating settlement:', settlementError)
         return { data: null, error: settlementError }
+      }
+
+      // Update calculated balances to reflect the settlement for advanced bills
+      const settlementAmount = Number(data.amount)
+      const amountPaisa = Math.round(settlementAmount * 100)
+
+      if (!Number.isFinite(amountPaisa)) {
+        console.warn('Skipping calculation update due to invalid settlement amount:', data.amount)
+      } else {
+        const { data: calculationRows, error: calculationFetchError } = await supabase
+          .from('bill_calculations')
+          .select('user_id, remaining_paisa, net_paisa')
+          .eq('bill_id', data.bill_id)
+          .in('user_id', [data.from_user, data.to_user])
+
+        if (calculationFetchError) {
+          console.error('Error fetching bill calculations for settlement update:', calculationFetchError)
+        } else if (calculationRows && calculationRows.length > 0) {
+          const timestamp = new Date().toISOString()
+
+          for (const calcRow of calculationRows) {
+            const currentRemaining = Number(calcRow.remaining_paisa) || 0
+            const currentNet = Number(calcRow.net_paisa) || 0
+            const isPayer = calcRow.user_id === data.from_user
+            const isReceiver = calcRow.user_id === data.to_user
+
+            if (!isPayer && !isReceiver) {
+              continue
+            }
+
+            let updatedRemaining = currentRemaining + (isPayer ? amountPaisa : -amountPaisa)
+
+            if (currentNet < 0) {
+              updatedRemaining = Math.min(updatedRemaining, 0)
+            } else if (currentNet > 0) {
+              updatedRemaining = Math.max(updatedRemaining, 0)
+            }
+
+            const { error: updateError } = await supabase
+              .from('bill_calculations')
+              .update({
+                remaining_paisa: Math.round(updatedRemaining),
+                last_updated: timestamp
+              })
+              .eq('bill_id', data.bill_id)
+              .eq('user_id', calcRow.user_id)
+
+            if (updateError) {
+              console.error('Error updating bill calculations after settlement:', updateError)
+            }
+          }
+        }
       }
 
       // Update bill status based on settlement completion
@@ -760,10 +1244,16 @@ export const billService: BillService = {
       const billsOwed = userPositions.filter(position => position.net_after_settlement < 0)
 
       // Get all user positions for the room to find creditors
+      const owedBillIds = billsOwed.map(b => b.bill_id)
+
+      if (owedBillIds.length === 0) {
+        return { data: [], error: null }
+      }
+
       const { data: allUserPositions, error: allPositionsError } = await supabase
         .from('v_unified_bill_user_position')
         .select('*')
-        .in('bill_id', billsOwed.map(b => b.bill_id))
+        .in('bill_id', owedBillIds)
 
       if (allPositionsError) {
         console.error('Error fetching all user positions:', allPositionsError)
@@ -781,24 +1271,79 @@ export const billService: BillService = {
           continue
         }
 
-        // Find creditors for this bill (people with positive net_after_settlement)
-        const creditors = allUserPositions
-          ?.filter(p =>
-            p.bill_id === position.bill_id &&
-            p.user_id !== userId &&
-            p.net_after_settlement > 0
-          )
-          .sort((a, b) => b.net_after_settlement - a.net_after_settlement) || []
+        const normalizedDebtorBalance = roundCurrency(Math.abs(toNumber(position.net_after_settlement)))
+
+        if (normalizedDebtorBalance <= CURRENCY_TOLERANCE) {
+          continue
+        }
+
+        const simpleContext = bill.is_advanced ? undefined : buildSimpleContextFromBill(bill)
+
+        if (bill.is_advanced && bill.calculations && bill.calculations.length > 0) {
+          const transfers = deriveSuggestedTransfersFromCalculations(bill.calculations, bill.id)
+          const userTransfers = transfers.filter(transfer => transfer.from_user_id === userId)
+
+          if (userTransfers.length > 0) {
+            const recipients = userTransfers.map(transfer => {
+              const profile =
+                bill.calculations?.find(calc => calc.user_id === transfer.to_user_id)?.profile ||
+                bill.participants?.find(p => p.user_id === transfer.to_user_id)?.profile ||
+                bill.payers?.find(payer => payer.user_id === transfer.to_user_id)?.profile
+
+              return {
+                user_id: transfer.to_user_id,
+                user_name: profile?.full_name || 'User',
+                amount_to_receive: roundCurrency(Number(transfer.amount_paisa || 0) / 100)
+              }
+            }).filter(recipient => recipient.amount_to_receive > CURRENCY_TOLERANCE)
+
+            const totalOwed = roundCurrency(
+              userTransfers.reduce(
+                (sum, transfer) => sum + Number(transfer.amount_paisa || 0),
+                0
+              ) / 100
+            )
+
+            if (recipients.length > 0 && totalOwed > CURRENCY_TOLERANCE) {
+              opportunities.push({
+                bill_id: position.bill_id,
+                bill_title: bill.title,
+                currency: bill.currency,
+                amount_owed: totalOwed,
+                recipients
+              })
+            }
+
+            continue
+          }
+        }
+
+        // Find creditors for this bill (people with positive outstanding balances)
+        const creditors = (allUserPositions || [])
+          .filter(p => p.bill_id === position.bill_id && p.user_id !== userId)
+          .map(creditor => {
+            const normalizedNet = bill.is_advanced
+              ? roundCurrency(toNumber(creditor.net_after_settlement))
+              : applySimpleNormalization(creditor, simpleContext).netAfter
+
+            return {
+              ...creditor,
+              normalized_net_after: normalizedNet
+            }
+          })
+          .filter(creditor => creditor.normalized_net_after > 0)
+          .sort((a, b) => b.normalized_net_after - a.normalized_net_after)
 
         const recipients = []
-        let remainingDebt = Math.abs(position.net_after_settlement)
+        let remainingDebt = normalizedDebtorBalance
 
         for (const creditor of creditors) {
           if (remainingDebt <= 0) break
 
-          const amountToReceive = Math.min(creditor.net_after_settlement, remainingDebt)
+          const amountToReceive = Math.min(creditor.normalized_net_after, remainingDebt)
+          const roundedAmount = roundCurrency(amountToReceive)
 
-          if (amountToReceive > 0) {
+          if (roundedAmount > CURRENCY_TOLERANCE) {
             // Get creditor's profile info
             const creditorProfile = bill.participants?.find(p => p.user_id === creditor.user_id)?.profile ||
                                   bill.payers?.find(p => p.user_id === creditor.user_id)?.profile
@@ -806,9 +1351,9 @@ export const billService: BillService = {
             recipients.push({
               user_id: creditor.user_id,
               user_name: creditorProfile?.full_name || 'User',
-              amount_to_receive: amountToReceive
+              amount_to_receive: roundedAmount
             })
-            remainingDebt -= amountToReceive
+            remainingDebt = Math.max(0, roundCurrency(remainingDebt - roundedAmount))
           }
         }
 
@@ -817,7 +1362,7 @@ export const billService: BillService = {
             bill_id: position.bill_id,
             bill_title: bill.title,
             currency: bill.currency,
-            amount_owed: Math.abs(position.net_after_settlement),
+            amount_owed: normalizedDebtorBalance,
             recipients
           })
         }
@@ -832,9 +1377,10 @@ export const billService: BillService = {
 
   async updateBillStatus(billId: string) {
     try {
-      // Get all user positions for this bill using the database view
+      // Get all user positions for this bill using the unified view so advanced bills
+      // and classic splits share the same settlement calculations
       const { data: userPositions, error: positionsError } = await supabase
-        .from('v_bill_user_position')
+        .from('v_unified_bill_user_position')
         .select('*')
         .eq('bill_id', billId)
 
@@ -851,9 +1397,34 @@ export const billService: BillService = {
         return { data: null, error: billError }
       }
 
-      // Check if bill is fully settled using the database view
-      // Anyone with negative net_after_settlement still owes money
-      const hasOutstandingDebts = userPositions?.some(position => position.net_after_settlement < -0.01) || false
+      // Check if bill is fully settled. For advanced bills we rely on the
+      // calculation table (which is already updated in paisa) so we can detect
+      // any remaining balance precisely. For classic bills we normalize the
+      // unified view output to ensure outgoing settlements reduce the debt
+      // instead of doubling it.
+      let hasOutstandingDebts = false
+
+      const simpleContext = billDetails.is_advanced ? undefined : buildSimpleContextFromBill(billDetails)
+
+      if (billDetails.is_advanced) {
+        const calculations = billDetails.calculations || []
+
+        if (calculations.length > 0) {
+          hasOutstandingDebts = calculations.some(calc => {
+            const remainingAmount = roundCurrency(
+              toNumber(calc.remaining_paisa) / CURRENCY_ROUNDING_FACTOR
+            )
+            return Math.abs(remainingAmount) > CURRENCY_TOLERANCE
+          })
+        } else {
+          hasOutstandingDebts =
+            userPositions?.some(position => Math.abs(toNumber(position.net_after_settlement)) > CURRENCY_TOLERANCE) ??
+            false
+        }
+      } else {
+        hasOutstandingDebts =
+          userPositions?.some(position => Math.abs(normalizeSimpleNetAfter(position, simpleContext)) > CURRENCY_TOLERANCE) ?? false
+      }
       const hasSettlements = billDetails.settlements && billDetails.settlements.length > 0
 
       // Determine new status

@@ -100,14 +100,16 @@ export function SettleAllForm({ room, currentUserId, onSuccess }: SettleAllFormP
 
     try {
       // Create settlements for each bill with this person
-      // IMPORTANT: When a debtor pays a creditor, the settlement is recorded as
-      // the creditor giving the debtor credit (from_user: creditor, to_user: debtor)
-      // This creates an incoming_settlement for the debtor, reducing their debt
+      // IMPORTANT: When a debtor pays a creditor, we record the debtor as the sender
+      // (from_user) and the creditor as the recipient (to_user). This matches the
+      // way settlements are interpreted everywhere else in the app, ensuring the
+      // debtor's outgoing settlements increase and the creditor's incoming
+      // settlements decrease their balances.
       for (const bill of selectedPersonData.bills) {
         const settlementData: CreateSettlementData = {
           bill_id: bill.bill_id,
-          from_user: selectedPersonData.user_id, // Creditor is giving credit
-          to_user: currentUserId,                 // Debtor is receiving credit
+          from_user: currentUserId,               // Debtor is paying off their balance
+          to_user: selectedPersonData.user_id,    // Creditor is receiving the payment
           amount: bill.amount,
           method: selectedMethod,
           note: note || undefined

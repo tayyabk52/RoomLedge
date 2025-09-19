@@ -18,7 +18,7 @@ import { ResponsiveNav } from '@/components/navigation/responsive-nav'
 import { useAuth } from '@/hooks/use-auth'
 import { useUserRoom } from '@/hooks/use-room-data'
 import { useBillDetails, useUserPosition } from '@/hooks/use-bill-data'
-import { BillStatus } from '@/types'
+import { BillStatus, type AdvanceBillCalculation } from '@/types'
 import { toast } from 'sonner'
 
 export const dynamic = 'force-dynamic'
@@ -115,33 +115,89 @@ export default function BillDetailsPage() {
   }
 
   const userPosition = getUserPosition()
+  const userCalculation = bill.is_advanced
+    ? bill.calculations?.find(calc => calc.user_id === user.id)
+    : undefined
+  const userShareAmount = userCalculation
+    ? userCalculation.owed_paisa / 100
+    : userPosition?.share_amount ?? 0
+  const userPaidAmount = userCalculation
+    ? userCalculation.covered_paisa / 100
+    : userPosition?.amount_paid ?? 0
   const participants = bill.participants || []
   const payers = bill.payers || []
   const settlements = bill.settlements || []
+  const calculations: AdvanceBillCalculation[] = bill.is_advanced
+    ? bill.calculations ?? []
+    : []
+  const calculationMap = new Map<string, AdvanceBillCalculation>()
+  calculations.forEach((calc) => {
+    calculationMap.set(calc.user_id, calc)
+  })
+  const settlementIncomingMap = new Map<string, number>()
+  const settlementOutgoingMap = new Map<string, number>()
+  settlements.forEach((settlement) => {
+    settlementIncomingMap.set(
+      settlement.to_user,
+      (settlementIncomingMap.get(settlement.to_user) ?? 0) + settlement.amount
+    )
+    settlementOutgoingMap.set(
+      settlement.from_user,
+      (settlementOutgoingMap.get(settlement.from_user) ?? 0) + settlement.amount
+    )
+  })
+  const totalAdvancedOwedPaisa = calculations.reduce(
+    (sum, calc) => sum + (Number.isFinite(calc.owed_paisa) ? calc.owed_paisa : 0),
+    0
+  )
+  const totalAdvancedRemainingPaisa = calculations.reduce(
+    (sum, calc) => sum + Math.max(calc.remaining_paisa, 0),
+    0
+  )
+  const hasAdvancedCalculations = bill.is_advanced && calculations.length > 0
+  const totalSettledAmount = hasAdvancedCalculations
+    ? Math.max(0, totalAdvancedOwedPaisa - totalAdvancedRemainingPaisa) / 100
+    : settlements.reduce((sum, s) => sum + s.amount, 0)
+  const outstandingAmount = hasAdvancedCalculations
+    ? Math.max(0, totalAdvancedRemainingPaisa) / 100
+    : undefined
   const StatusIcon = getStatusIcon(bill.status)
 
-  // Calculate equal share per participant
+  // Calculate equal share per participant (fallback for non-advanced bills)
   const sharePerParticipant = participants.length > 0 ? bill.total_amount / participants.length : 0
 
-  // Calculate who owes what
   const participantSummary = participants.map(participant => {
-    const amountPaid = payers.find(p => p.user_id === participant.user_id)?.amount_paid || 0
-    const netBeforeSettlement = amountPaid - sharePerParticipant
+    const position = userPositions?.find(p => p.bill_id === billId && p.user_id === participant.user_id)
+    const calculation = calculationMap.get(participant.user_id)
 
-    // Calculate settlements for this user
-    const incomingSettlements = settlements
-      .filter(s => s.to_user === participant.user_id)
-      .reduce((sum, s) => sum + s.amount, 0)
+    const shareAmount = calculation
+      ? calculation.owed_paisa / 100
+      : position?.share_amount ?? sharePerParticipant
 
-    const outgoingSettlements = settlements
-      .filter(s => s.from_user === participant.user_id)
-      .reduce((sum, s) => sum + s.amount, 0)
+    const amountPaid = calculation
+      ? calculation.covered_paisa / 100
+      : position?.amount_paid ?? (payers.find(p => p.user_id === participant.user_id)?.amount_paid || 0)
 
-    const netAfterSettlement = netBeforeSettlement + incomingSettlements - outgoingSettlements
+    const incomingSettlements = position?.incoming_settlements
+      ?? settlementIncomingMap.get(participant.user_id)
+      ?? 0
+
+    const outgoingSettlements = position?.outgoing_settlements
+      ?? settlementOutgoingMap.get(participant.user_id)
+      ?? 0
+
+    const netBeforeSettlement = calculation
+      ? calculation.net_paisa / 100
+      : position?.net_before_settlement ?? (amountPaid - shareAmount)
+
+    const netAfterSettlement = calculation
+      ? calculation.remaining_paisa / 100
+      : position?.net_after_settlement
+        ?? (netBeforeSettlement + incomingSettlements - outgoingSettlements)
 
     return {
       ...participant,
-      shareAmount: sharePerParticipant,
+      shareAmount,
       amountPaid,
       netBeforeSettlement,
       incomingSettlements,
@@ -263,7 +319,7 @@ export default function BillDetailsPage() {
                         <div className="text-center p-3 bg-blue-50 rounded-lg">
                           <p className="text-sm text-gray-600 mb-1">Your Share</p>
                           <CurrencyDisplay
-                            amount={userPosition.share_amount}
+                            amount={userShareAmount}
                             currency={bill.currency}
                             className="font-semibold text-blue-600"
                           />
@@ -271,7 +327,7 @@ export default function BillDetailsPage() {
                         <div className="text-center p-3 bg-green-50 rounded-lg">
                           <p className="text-sm text-gray-600 mb-1">You Paid</p>
                           <CurrencyDisplay
-                            amount={userPosition.amount_paid}
+                            amount={userPaidAmount}
                             currency={bill.currency}
                             className="font-semibold text-green-600"
                           />
@@ -475,11 +531,22 @@ export default function BillDetailsPage() {
                         <p className="text-gray-600">Total settled</p>
                         <p className="font-medium">
                           <CurrencyDisplay
-                            amount={settlements.reduce((sum, s) => sum + s.amount, 0)}
+                            amount={totalSettledAmount}
                             currency={bill.currency}
                           />
                         </p>
                       </div>
+                      {hasAdvancedCalculations && (
+                        <div>
+                          <p className="text-gray-600">Outstanding</p>
+                          <p className="font-medium">
+                            <CurrencyDisplay
+                              amount={outstandingAmount ?? 0}
+                              currency={bill.currency}
+                            />
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>

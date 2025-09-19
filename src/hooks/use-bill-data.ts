@@ -6,15 +6,17 @@ import { useAuth } from './use-auth'
 import { CreateBillData, CreateSettlementData } from '@/types'
 
 export function useRoomBills(roomId?: string) {
+  const { user } = useAuth()
+
   return useQuery({
-    queryKey: ['room-bills', roomId],
+    queryKey: ['room-bills', roomId, user?.id],
     queryFn: async () => {
-      if (!roomId) return null
-      const { data, error } = await billService.getRoomBills(roomId)
+      if (!roomId || !user?.id) return null
+      const { data, error } = await billService.getRoomBills(roomId, user.id)
       if (error) throw error
       return data
     },
-    enabled: !!roomId,
+    enabled: !!roomId && !!user?.id,
   })
 }
 
@@ -62,32 +64,36 @@ export function useBillDetails(billId?: string) {
 }
 
 export function useRoomStatistics(roomId?: string) {
+  const { user } = useAuth()
+
   return useQuery({
-    queryKey: ['room-statistics', roomId],
+    queryKey: ['room-statistics', roomId, user?.id],
     queryFn: async () => {
-      if (!roomId) return null
-      const { data, error } = await billService.getRoomStatistics(roomId)
+      if (!roomId || !user?.id) return null
+      const { data, error } = await billService.getRoomStatistics(roomId, user.id)
       if (error) throw error
       return data
     },
-    enabled: !!roomId,
+    enabled: !!roomId && !!user?.id,
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
   })
 }
 
 export function useRecentActivity(roomId?: string, limit: number = 10) {
+  const { user } = useAuth()
+
   return useQuery({
-    queryKey: ['recent-activity', roomId, limit],
+    queryKey: ['recent-activity', roomId, user?.id, limit],
     queryFn: async () => {
-      if (!roomId) return []
-      const { data, error } = await billService.getRecentActivity(roomId, limit)
+      if (!roomId || !user?.id) return []
+      const { data, error } = await billService.getRecentActivity(roomId, user.id, limit)
       if (error) {
         console.warn('Error fetching recent activity:', error)
         return [] // Return empty array on error instead of throwing
       }
       return data || []
     },
-    enabled: !!roomId,
+    enabled: !!roomId && !!user?.id,
     staleTime: 2 * 60 * 1000, // Cache for 2 minutes
   })
 }
